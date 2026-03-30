@@ -47,7 +47,7 @@ export function LoginScreen() {
 
   const finishAuth = async () => {
     const un = username.trim() || "Пользователь";
-    const em = (!isLogin ? email.trim() : `${un}@example.com`) || `${un}@example.com`;
+    const em = (!isLogin ? email.trim() : `${un}`) || `${un}`;
     const pwd = password;
 
     if (!pwd || pwd.length < 6) {
