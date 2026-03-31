@@ -20,6 +20,8 @@ interface AppSettingsValue {
   setCurrency: (c: CurrencyCode) => void;
   userProfile: UserProfile | null;
   setUserProfile: (p: UserProfile | null) => void;
+  walletBalance: number;
+  setWalletBalance: (v: number) => void;
   authToken: string | null;
   setAuthToken: (t: string | null) => void;
   logout: () => void;
@@ -43,6 +45,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
   const [, setRatesVersion] = useState(0);
   const [hideFromSearch, setHideFromSearch] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [walletBalance, setWalletBalance] = useState<number>(100000);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [isAuthHydrating, setIsAuthHydrating] = useState(true);
   const didHydrateRef = useRef(false);
@@ -51,6 +54,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     setUserProfile(null);
+    setWalletBalance(100000);
     setAuthToken(null);
     void persistSet("authToken", null);
     void persistSet("userProfile", null);
@@ -174,6 +178,8 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       setCurrency,
       userProfile,
       setUserProfile,
+      walletBalance,
+      setWalletBalance,
       authToken,
       setAuthToken,
       logout,
@@ -187,6 +193,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     [
       currency,
       userProfile,
+      walletBalance,
       logout,
       authToken,
       canInteract,

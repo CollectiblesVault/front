@@ -25,7 +25,7 @@ import { TabAwareScrollView } from "../components/TabAwareScrollView";
 import { useAppSettings } from "../context/app-settings-context";
 import { useCollectionsStore } from "../context/collections-store-context";
 import { useWishlist } from "../context/wishlist-context";
-import { createItemCommentApi, getItemCommentsApi, likeItemApi, unlikeItemApi } from "../api/vaultApi";
+import { createItemCommentApi, getItemCommentsApi, likeItemWithFallbackApi, unlikeItemApi } from "../api/vaultApi";
 import type { RootStackParamList } from "../navigation/types";
 import { theme } from "../theme";
 import { pluralRu } from "../utils/pluralRu";
@@ -69,6 +69,7 @@ export function ItemDetailScreen() {
     return null;
   }, [getItem, itemId, route.params.itemPreview]);
   const [isLiked, setIsLiked] = useState(false);
+  const [likesCount, setLikesCount] = useState(0);
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [commentDraft, setCommentDraft] = useState("");
   const [isLoadingComments, setIsLoadingComments] = useState(true);
@@ -113,7 +114,10 @@ export function ItemDetailScreen() {
 
   const inWishlist = base ? isInWishlist(base.id) : false;
 
-  const likesLabel = useMemo(() => (isLiked ? "Вы поставили лайк" : "Лайк"), [isLiked]);
+  const likesLabel = useMemo(
+    () => (likesCount > 0 ? `${likesCount} ${pluralRu(likesCount, "лайк", "лайка", "лайков")}` : "Лайк"),
+    [likesCount],
+  );
 
   const requireAuth = useCallback(
     (action: () => void) => {
@@ -166,9 +170,14 @@ export function ItemDetailScreen() {
     requireAuth(() => {
       const next = !isLiked;
       setIsLiked(next);
+      setLikesCount((prev) => Math.max(0, prev + (next ? 1 : -1)));
       if (!authToken) return;
       if (!Number.isFinite(itemId)) return;
-      void (next ? likeItemApi({ token: authToken, itemId }) : unlikeItemApi({ token: authToken, itemId })).catch(() => {});
+      void (next ? likeItemWithFallbackApi({ token: authToken, itemId }) : unlikeItemApi({ token: authToken, itemId })).catch(() => {
+        setIsLiked(!next);
+        setLikesCount((prev) => Math.max(0, prev + (next ? -1 : 1)));
+        Alert.alert("Лайк не поставлен", "Попробуйте ещё раз.");
+      });
     });
   };
 
@@ -202,7 +211,6 @@ export function ItemDetailScreen() {
   }, [authToken, commentDraft, itemId, requireAuth]);
 
   const showEdit = canInteract && !browse;
-  const conditionLabel = "Excellent";
 
   useEffect(() => {
     if (route.params.openEdit === true && showEdit) {
@@ -258,9 +266,7 @@ export function ItemDetailScreen() {
               <Text style={styles.title}>{base?.name ?? "Предмет"}</Text>
               <Text style={styles.price}>{formatMoney(base?.price ?? 0)}</Text>
             </View>
-            <Text style={styles.metaLine}>
-              {(base?.category ?? "—")} • 1972 • {conditionLabel}
-            </Text>
+            <Text style={styles.metaLine}>{base?.category ?? "—"}</Text>
             <View style={styles.kpiRow}>
               <View style={styles.kpiCard}>
                 <Text style={styles.kpiLabel}>Current Value</Text>
@@ -281,9 +287,7 @@ export function ItemDetailScreen() {
                     color={isLiked ? theme.primary : theme.mutedForeground}
                     fill={isLiked ? theme.primary : "transparent"}
                   />
-                  <Text style={styles.socialText}>
-                    {isLiked ? "25 likes" : "24 likes"}
-                  </Text>
+                  <Text style={styles.socialText}>{likesLabel}</Text>
                 </TouchableOpacity>
                 <View style={styles.socialBtn}>
                   <MessageCircle size={16} color={theme.mutedForeground} />

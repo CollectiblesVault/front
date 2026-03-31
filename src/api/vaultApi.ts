@@ -578,6 +578,21 @@ export async function likeItemApi({ token, itemId }: { token?: string | null; it
   });
 }
 
+export async function likeItemWithFallbackApi({
+  token,
+  itemId,
+}: {
+  token?: string | null;
+  itemId: number;
+}) {
+  try {
+    return await likeItemApi({ token, itemId });
+  } catch {
+    // Some backends expose generic social like endpoint only.
+    return createLikeApi({ token, entity_type: "item", entity_id: itemId });
+  }
+}
+
 export async function unlikeItemApi({ token, itemId }: { token?: string | null; itemId: number }) {
   return apiRequest<any>({
     method: "DELETE",

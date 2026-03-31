@@ -62,7 +62,7 @@ function toNumber(v: unknown, fallback = 0) {
 
 export function AuctionScreen() {
   const insets = useSafeAreaInsets();
-  const { authToken, canInteract, formatMoney, userProfile } = useAppSettings();
+  const { authToken, canInteract, formatMoney, userProfile, walletBalance, setWalletBalance } = useAppSettings();
   const { collectionsList, itemsForCollection } = useCollectionsStore();
   const [isOffline] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -282,6 +282,10 @@ export function AuctionScreen() {
       Alert.alert("Проверьте ставку", "Введите сумму ставки.");
       return;
     }
+    if (amount > walletBalance) {
+      Alert.alert("Недостаточно средств", "Пополните кошелёк или уменьшите ставку.");
+      return;
+    }
     try {
       await createBidApi({ token: authToken, lot_id: lot.id, amount });
       const nowIso = new Date().toISOString();
@@ -301,6 +305,7 @@ export function AuctionScreen() {
         ),
       );
       setBidMap((prev) => ({ ...prev, [lot.id]: "" }));
+      setWalletBalance(walletBalance - amount);
     } catch (e: any) {
       Alert.alert("Ставка не принята", e?.message ? String(e.message) : "Попробуйте ещё раз.");
     }
@@ -314,9 +319,15 @@ export function AuctionScreen() {
           <Text style={styles.h1}>Auctions</Text>
           <Text style={styles.sub}>{activeLots.length} active lots</Text>
         </View>
-        <TouchableOpacity style={styles.createBtn} onPress={() => setCreateOpen(true)} activeOpacity={0.9}>
-          <Plus size={16} color={theme.primaryForeground} />
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <View style={styles.walletBox}>
+            <Text style={styles.walletLabel}>Wallet</Text>
+            <Text style={styles.walletValue}>{formatMoney(walletBalance)}</Text>
+          </View>
+          <TouchableOpacity style={styles.createBtn} onPress={() => setCreateOpen(true)} activeOpacity={0.9}>
+            <Plus size={16} color={theme.primaryForeground} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.tabsRow}>
@@ -616,6 +627,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 12 },
+  walletBox: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: theme.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.border,
+  },
+  walletLabel: { fontSize: 11, color: theme.mutedForeground },
+  walletValue: { fontSize: 13, fontWeight: "600", color: theme.foreground },
   tabsRow: {
     paddingHorizontal: 16,
     paddingTop: 12,

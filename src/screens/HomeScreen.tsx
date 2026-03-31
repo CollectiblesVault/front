@@ -275,24 +275,24 @@ export function HomeScreen() {
                     }
 
                     try {
-                      if (authToken && profileAvatarDraft.trim()) {
-                        const isRemoteUrl = /^https?:\/\//i.test(profileAvatarDraft.trim());
-                        if (isRemoteUrl) {
-                          await patchMeApi({
-                            token: authToken,
-                            patch: { avatar_url: profileAvatarDraft.trim() },
-                          });
-                        } else {
-                          await uploadMyAvatarApi({
-                            token: authToken,
-                            fileUri: profileAvatarDraft.trim(),
-                          });
-                        }
-                      }
+                      const trimmedAvatar = profileAvatarDraft.trim();
+                      const isRemoteAvatar = trimmedAvatar.length > 0 && /^https?:\/\//i.test(trimmedAvatar);
+
                       const updated = await patchMeApi({
                         token: authToken,
-                        patch: { display_name: nextName, email: nextEmail },
+                        patch: {
+                          display_name: nextName,
+                          email: nextEmail,
+                          ...(isRemoteAvatar ? { avatar_url: trimmedAvatar } : {}),
+                        },
                       });
+
+                      if (trimmedAvatar.length > 0 && !isRemoteAvatar) {
+                        await uploadMyAvatarApi({
+                          token: authToken,
+                          fileUri: trimmedAvatar,
+                        });
+                      }
 
                       const resolvedEmail =
                         typeof updated?.email === "string"

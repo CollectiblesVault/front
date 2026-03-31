@@ -18,7 +18,7 @@ import {
   getPublicCollectionItemsApi,
   getPublicUserApi,
   getUserCollectionsApi,
-  likeItemApi,
+  likeItemWithFallbackApi,
   unlikeItemApi,
 } from "../api/vaultApi";
 import type { RootStackParamList } from "../navigation/types";
@@ -90,7 +90,7 @@ export function UserProfileScreen() {
         const next = !Boolean(likedByItemId[itemId]);
         setLikedByItemId((prev) => ({ ...prev, [itemId]: next }));
         if (!authToken) return;
-        void (next ? likeItemApi({ token: authToken, itemId }) : unlikeItemApi({ token: authToken, itemId })).catch(() => {
+        void (next ? likeItemWithFallbackApi({ token: authToken, itemId }) : unlikeItemApi({ token: authToken, itemId })).catch(() => {
           setLikedByItemId((prev) => ({ ...prev, [itemId]: !next }));
         });
       });
