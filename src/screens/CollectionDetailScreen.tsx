@@ -5,8 +5,6 @@ import {
   Bookmark,
   ChevronLeft,
   Filter,
-  Heart,
-  MessageCircle,
   Pencil,
   Plus,
   Search,
@@ -58,7 +56,6 @@ export function CollectionDetailScreen() {
     collectionIsPublic,
     setCollectionVisibility,
     addItemToCollection,
-    mergedItemDetail,
   } = useCollectionsStore();
   const { isInWishlist, toggleWishlist } = useWishlist();
 
@@ -78,8 +75,6 @@ export function CollectionDetailScreen() {
     name: "",
     category: "",
     price: "",
-    year: "",
-    condition: "",
     image: "",
     description: "",
   });
@@ -146,8 +141,6 @@ export function CollectionDetailScreen() {
         name: "",
         category: "",
         price: "",
-        year: String(new Date().getFullYear()),
-        condition: "",
         image: "",
         description: "",
       });
@@ -204,9 +197,8 @@ export function CollectionDetailScreen() {
 
   const submitNewItem = useCallback(() => {
     const price = Number.parseFloat(newItemDraft.price.replace(/\s/g, "").replace(",", "."));
-    const year = Number.parseInt(newItemDraft.year, 10);
-    if (!newItemDraft.name.trim() || Number.isNaN(price) || Number.isNaN(year)) {
-      Alert.alert("Проверьте данные", "Укажите название, цену и год.");
+    if (!newItemDraft.name.trim() || Number.isNaN(price)) {
+      Alert.alert("Проверьте данные", "Укажите название и цену.");
       return;
     }
     const img = newItemDraft.image.trim();
@@ -214,9 +206,7 @@ export function CollectionDetailScreen() {
       name: newItemDraft.name.trim(),
       category: newItemDraft.category.trim() || "Разное",
       price,
-      year,
-      condition: newItemDraft.condition.trim() || "—",
-      image: img || collectionImage(route.params.id),
+      imageUrl: img || collectionImage(route.params.id),
       description: newItemDraft.description.trim(),
     });
     setNewItemOpen(false);
@@ -230,7 +220,7 @@ export function CollectionDetailScreen() {
           name: item.name,
           category: item.category,
           estimatedPrice: item.price,
-          image: item.image,
+          image: item.imageUrl,
           notes: "",
         });
       });
@@ -308,7 +298,8 @@ export function CollectionDetailScreen() {
       >
         <View style={styles.grid}>
           {filteredItems.map((item) => {
-            const detail = mergedItemDetail(String(item.id));
+            const desc = (item.description ?? "").trim();
+            const preview = desc.length > 20 ? `${desc.slice(0, 20)}…` : desc || "—";
             return (
               <View key={item.id} style={[styles.card, { width: colW }]}>
               <TouchableOpacity
@@ -322,7 +313,7 @@ export function CollectionDetailScreen() {
                 activeOpacity={0.92}
               >
                 <View style={styles.imageWrap}>
-                  <ImageWithFallback uri={item.image} style={styles.image} />
+                  <ImageWithFallback uri={item.imageUrl} style={styles.image} />
                   {item.price >= 40000 ? (
                     <View style={styles.topBadge}>
                       <Sparkles size={12} color={theme.primary} />
@@ -343,7 +334,7 @@ export function CollectionDetailScreen() {
                 </View>
                 <View style={styles.cardBody}>
                   <Text style={styles.itemDescPreview} numberOfLines={2}>
-                    {detail.description?.slice(0, 20) ? `${detail.description.slice(0, 20)}…` : "—"}
+                    {preview}
                   </Text>
                   <Text style={styles.itemName} numberOfLines={1}>
                     {item.name}
@@ -351,16 +342,6 @@ export function CollectionDetailScreen() {
 
                   <View style={styles.itemRow}>
                     <Text style={styles.price}>{formatMoney(item.price)}</Text>
-                    <View style={styles.likesCommentsRow}>
-                      <View style={styles.likeChip}>
-                        <Heart size={14} color={theme.primary} />
-                        <Text style={styles.likeChipText}>{detail.likes}</Text>
-                      </View>
-                      <View style={styles.likeChip}>
-                        <MessageCircle size={14} color={theme.mutedForeground} />
-                        <Text style={styles.likeChipText}>{detail.comments.length}</Text>
-                      </View>
-                    </View>
                   </View>
 
                 </View>
@@ -476,19 +457,13 @@ export function CollectionDetailScreen() {
                     style={styles.editInput}
                   />
                   <TextInput
-                    value={newItemDraft.year}
-                    onChangeText={(t) => setNewItemDraft((d) => ({ ...d, year: t }))}
-                    placeholder="Год"
-                    keyboardType="number-pad"
+                    value={newItemDraft.image}
+                    onChangeText={(t) => setNewItemDraft((d) => ({ ...d, image: t }))}
+                    placeholder="Фото (URL)"
                     placeholderTextColor={theme.mutedForeground}
                     style={styles.editInput}
-                  />
-                  <TextInput
-                    value={newItemDraft.condition}
-                    onChangeText={(t) => setNewItemDraft((d) => ({ ...d, condition: t }))}
-                    placeholder="Состояние"
-                    placeholderTextColor={theme.mutedForeground}
-                    style={styles.editInput}
+                    autoCapitalize="none"
+                    autoCorrect={false}
                   />
 
                   {newItemDraft.image.trim().length > 0 ? (
@@ -527,15 +502,6 @@ export function CollectionDetailScreen() {
                     </View>
                   ) : null}
 
-                  <TextInput
-                    value={newItemDraft.image}
-                    onChangeText={(t) => setNewItemDraft((d) => ({ ...d, image: t }))}
-                    placeholder="Фото (URL)"
-                    placeholderTextColor={theme.mutedForeground}
-                    style={styles.editInput}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
                   <TextInput
                     value={newItemDraft.description}
                     onChangeText={(t) => setNewItemDraft((d) => ({ ...d, description: t }))}

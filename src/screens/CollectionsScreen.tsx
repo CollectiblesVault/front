@@ -183,7 +183,7 @@ export function CollectionsScreen() {
                 activeOpacity={0.9}
               >
                 <View style={styles.gridImageWrap}>
-                  <ImageWithFallback uri={c.image} style={styles.gridImage} borderRadius={0} />
+                  <ImageWithFallback uri={c.imageUrl} style={styles.gridImage} borderRadius={0} />
                 </View>
                 <View style={styles.gridMeta}>
                   <Text style={styles.cardTitle} numberOfLines={1}>
@@ -205,7 +205,7 @@ export function CollectionsScreen() {
                 activeOpacity={0.9}
               >
                 <View style={styles.listThumb}>
-                  <ImageWithFallback uri={c.image} style={styles.listImage} borderRadius={10} />
+                  <ImageWithFallback uri={c.imageUrl} style={styles.listImage} borderRadius={10} />
                 </View>
                 <View style={styles.listMeta}>
                   <Text style={styles.cardTitle} numberOfLines={1}>

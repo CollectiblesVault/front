@@ -1,4 +1,5 @@
 export type RootStackParamList = {
+  Bootstrap: undefined;
   Welcome: undefined;
   Login: { mode?: "login" | "register" } | undefined;
   Home: undefined;
@@ -10,7 +11,6 @@ export type RootStackParamList = {
   Community: undefined;
   Auction: undefined;
   UserProfile: { userId: string };
-  OfflineDemo: undefined;
 };
 
 declare global {

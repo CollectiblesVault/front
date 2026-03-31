@@ -90,9 +90,9 @@ export function WishlistProvider({ children }: { children: ReactNode }) {
   const toggleWishlist = useCallback(
     (entry: Omit<WishlistEntry, "priority"> & { priority?: WishlistEntry["priority"] }) => {
       if (isInWishlist(entry.id)) {
-        removeFromWishlist(entry.id);
+        return removeFromWishlist(entry.id);
       } else {
-        addToWishlist(entry);
+        return addToWishlist(entry);
       }
     },
     [addToWishlist, removeFromWishlist, isInWishlist],

@@ -1,16 +1,17 @@
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { Heart, MessageCircle, ThumbsUp, X } from "lucide-react-native";
-import { useMemo, useState } from "react";
+import { Heart, X } from "lucide-react-native";
+import { useMemo } from "react";
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomNav } from "../components/BottomNav";
+import { ErrorState } from "../components/ErrorState";
+import { LoadingState } from "../components/LoadingState";
 import { TabAwareScrollView } from "../components/TabAwareScrollView";
 import { ImageWithFallback } from "../components/ImageWithFallback";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { useAppSettings } from "../context/app-settings-context";
-import { useCollectionsStore } from "../context/collections-store-context";
 import { useWishlist } from "../context/wishlist-context";
 import type { RootStackParamList } from "../navigation/types";
 import { theme } from "../theme";
@@ -21,10 +22,8 @@ export function WishlistScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { formatMoney, canInteract } = useAppSettings();
-  const { entries, removeFromWishlist } = useWishlist();
-  const [isOffline] = useState(false);
-  const { mergedItemDetail } = useCollectionsStore();
-  const [likedMap, setLikedMap] = useState<Record<number, boolean>>({});
+  const { entries, removeFromWishlist, isLoading, error, refresh } = useWishlist();
+  const isOffline = false;
 
   const totalEstimated = useMemo(() => entries.reduce((s, i) => s + i.estimatedPrice, 0), [entries]);
 
@@ -54,7 +53,11 @@ export function WishlistScreen() {
         </Text>
       </View>
 
-      {entries.length === 0 ? (
+      {error ? (
+        <ErrorState message={error} onRetry={refresh} />
+      ) : isLoading ? (
+        <LoadingState />
+      ) : entries.length === 0 ? (
         <View style={styles.empty}>
           <View style={styles.emptyIcon}>
             <Heart size={40} color={theme.mutedForeground} />
@@ -68,13 +71,6 @@ export function WishlistScreen() {
           showsVerticalScrollIndicator={false}
         >
           {entries.map((item) => {
-            const detail = mergedItemDetail(String(item.id));
-            const desc = (detail.description ?? "").trim();
-            const preview = desc.length > 20 ? `${desc.slice(0, 20)}…` : desc || "—";
-            const liked = likedMap[item.id] === true;
-            const likesCount = detail.likes + (liked ? 1 : 0);
-            const commentsCount = detail.comments.length;
-
             return (
             <TouchableOpacity
               key={item.id}
@@ -106,7 +102,7 @@ export function WishlistScreen() {
                     </TouchableOpacity>
                   </View>
                   <Text style={styles.descPreview} numberOfLines={2}>
-                    {preview}
+                    {item.notes?.trim() ? item.notes.trim() : "—"}
                   </Text>
                   <Text style={styles.cat}>{item.category}</Text>
                   <View style={styles.bottomRow}>
@@ -114,28 +110,6 @@ export function WishlistScreen() {
                     <Text style={[styles.pri, { color: priorityColor(item.priority) }]}>
                       {priorityLabel(item.priority).toUpperCase()}
                     </Text>
-                  </View>
-
-                  <View style={styles.socialRow}>
-                    <TouchableOpacity
-                      style={[styles.socialBtn, !canInteract && { opacity: 0.5 }]}
-                      onPress={() => {
-                        if (!canInteract) return;
-                        setLikedMap((prev) => ({ ...prev, [item.id]: !liked }));
-                      }}
-                      activeOpacity={0.85}
-                    >
-                      <ThumbsUp size={16} color={liked ? theme.primary : theme.mutedForeground} fill={liked ? theme.primary : "transparent"} />
-                      <Text style={styles.socialBtnText}>{likesCount}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.socialBtn}
-                      onPress={() => navigation.navigate("ItemDetail", { id: String(item.id), browse: true, openEdit: false })}
-                      activeOpacity={0.85}
-                    >
-                      <MessageCircle size={16} color={theme.mutedForeground} />
-                      <Text style={styles.socialBtnText}>{commentsCount}</Text>
-                    </TouchableOpacity>
                   </View>
                 </View>
               </View>

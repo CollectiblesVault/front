@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
 import { TabTransitionOverlay } from "../components/TabTransitionOverlay";
 import { useTabTransition } from "../context/tab-transition-context";
+import { BootstrapScreen } from "../screens/BootstrapScreen";
 import { CollectionDetailScreen } from "../screens/CollectionDetailScreen";
 import { CollectionsScreen } from "../screens/CollectionsScreen";
 import { CommunityScreen } from "../screens/CommunityScreen";
@@ -10,7 +11,6 @@ import { AuctionScreen } from "../screens/AuctionScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { ItemDetailScreen } from "../screens/ItemDetailScreen";
 import { LoginScreen } from "../screens/LoginScreen";
-import { OfflineDemoScreen } from "../screens/OfflineDemoScreen";
 import { ReportsScreen } from "../screens/ReportsScreen";
 import { UserProfileScreen } from "../screens/UserProfileScreen";
 import { WelcomeScreen } from "../screens/WelcomeScreen";
@@ -39,13 +39,14 @@ export function RootNavigator() {
     <>
       <NavigationContainer theme={navTheme} onStateChange={onNavigationStateChange}>
         <Stack.Navigator
-          initialRouteName="Welcome"
+          initialRouteName="Bootstrap"
           screenOptions={{
             headerShown: false,
             contentStyle: { backgroundColor: theme.background },
             animation: "slide_from_right",
           }}
         >
+          <Stack.Screen name="Bootstrap" component={BootstrapScreen} />
           <Stack.Screen name="Welcome" component={WelcomeScreen} />
           <Stack.Screen name="Home" component={HomeScreen} />
           <Stack.Screen name="Login" component={LoginScreen} />
@@ -57,7 +58,6 @@ export function RootNavigator() {
           <Stack.Screen name="Community" component={CommunityScreen} />
           <Stack.Screen name="Auction" component={AuctionScreen} />
           <Stack.Screen name="UserProfile" component={UserProfileScreen} />
-          <Stack.Screen name="OfflineDemo" component={OfflineDemoScreen} />
         </Stack.Navigator>
       </NavigationContainer>
       <TabTransitionOverlay />

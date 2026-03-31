@@ -25,7 +25,7 @@ export function UserProfileScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<R>();
   const { formatMoney, authToken } = useAppSettings();
-  const { mergedItemDetail } = useCollectionsStore();
+  useCollectionsStore();
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

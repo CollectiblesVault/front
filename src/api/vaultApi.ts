@@ -562,3 +562,169 @@ export async function createBidApi({
   });
 }
 
+// --- Health ---
+export async function healthApi() {
+  return apiRequest<Record<string, string>>({ method: "GET", path: "/api/health" });
+}
+
+export async function dbHealthApi() {
+  return apiRequest<Record<string, string>>({ method: "GET", path: "/api/db-health" });
+}
+
+// --- Auth (extended) ---
+export async function changePasswordApi({
+  token,
+  current_password,
+  new_password,
+}: {
+  token: string;
+  current_password: string;
+  new_password: string;
+}) {
+  return apiRequest<Record<string, boolean>>({
+    method: "POST",
+    path: "/api/auth/me/password",
+    token,
+    body: { current_password, new_password },
+  });
+}
+
+export async function deactivateMeApi({ token }: { token: string }) {
+  return apiRequest<any>({
+    method: "PATCH",
+    path: "/api/auth/me/deactivate",
+    token,
+  });
+}
+
+// --- Reports (additional endpoints from OpenAPI) ---
+export async function reportsCollectionApi({
+  token,
+  collectionId,
+  fromDate,
+  toDate,
+}: {
+  token?: string | null;
+  collectionId: number;
+  fromDate: string; // ISO
+  toDate: string; // ISO
+}) {
+  return apiRequest<any[]>({
+    method: "GET",
+    path: "/api/reports/collection",
+    query: { collectionId, fromDate, toDate },
+    token,
+  });
+}
+
+export async function reportsItemApi({ token, itemId }: { token?: string | null; itemId: number }) {
+  return apiRequest<any>({
+    method: "GET",
+    path: "/api/reports/item",
+    query: { itemId },
+    token,
+  });
+}
+
+export async function reportsCategoryApi({
+  token,
+  sort = "items_count",
+}: {
+  token?: string | null;
+  sort?: string;
+}) {
+  return apiRequest<any[]>({
+    method: "GET",
+    path: "/api/reports/category",
+    query: { sort },
+    token,
+  });
+}
+
+export async function reportsCollectionsCsvApi({
+  token,
+  fromDate,
+  toDate,
+}: {
+  token?: string | null;
+  fromDate: string; // ISO
+  toDate: string; // ISO
+}) {
+  return apiRequest<string>({
+    method: "GET",
+    path: "/api/reports/collections.csv",
+    query: { fromDate, toDate },
+    token,
+    headers: { Accept: "text/csv" },
+  });
+}
+
+export async function reportsItemsCsvApi({
+  token,
+  fromDate,
+  toDate,
+}: {
+  token?: string | null;
+  fromDate: string; // ISO
+  toDate: string; // ISO
+}) {
+  return apiRequest<string>({
+    method: "GET",
+    path: "/api/reports/items.csv",
+    query: { fromDate, toDate },
+    token,
+    headers: { Accept: "text/csv" },
+  });
+}
+
+// --- Social (generic endpoints from OpenAPI) ---
+export async function createLikeApi({
+  token,
+  entity_type,
+  entity_id,
+}: {
+  token?: string | null;
+  entity_type: string;
+  entity_id: number;
+}) {
+  return apiRequest<any>({
+    method: "POST",
+    path: "/api/like",
+    token,
+    body: { entity_type, entity_id },
+  });
+}
+
+export async function createCommentApi({
+  token,
+  entity_type,
+  entity_id,
+  text,
+}: {
+  token?: string | null;
+  entity_type: string;
+  entity_id: number;
+  text: string;
+}) {
+  return apiRequest<any>({
+    method: "POST",
+    path: "/api/comment",
+    token,
+    body: { entity_type, entity_id, text },
+  });
+}
+
+export async function getCommentsApi({
+  entity_type,
+  entity_id,
+}: {
+  entity_type: string;
+  entity_id: number;
+}) {
+  return apiRequest<any[]>({
+    method: "GET",
+    path: "/api/comments",
+    query: { entity_type, entity_id },
+  });
+}
+

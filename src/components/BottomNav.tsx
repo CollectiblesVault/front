@@ -13,6 +13,9 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 function goTab(navigation: Nav, key: keyof RootStackParamList) {
   switch (key) {
+    case "Bootstrap":
+      navigation.navigate("Home");
+      break;
     case "Welcome":
       navigation.navigate("Welcome");
       break;
@@ -45,9 +48,6 @@ function goTab(navigation: Nav, key: keyof RootStackParamList) {
       break;
     case "UserProfile":
       navigation.navigate("UserProfile", { userId: "u-nina" });
-      break;
-    case "OfflineDemo":
-      navigation.navigate("OfflineDemo");
       break;
     default: {
       const _exhaustive: never = key;

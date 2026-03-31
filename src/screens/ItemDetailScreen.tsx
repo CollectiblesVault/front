@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomNav } from "../components/BottomNav";
 import { ImageWithFallback } from "../components/ImageWithFallback";
+import { Skeleton } from "../components/Skeleton";
 import { TabAwareScrollView } from "../components/TabAwareScrollView";
 import { useAppSettings } from "../context/app-settings-context";
 import { useCollectionsStore } from "../context/collections-store-context";
@@ -41,7 +42,7 @@ export function ItemDetailScreen() {
   const { formatMoney, canInteract, authToken } = useAppSettings();
   const { isInWishlist, toggleWishlist } = useWishlist();
   const {
-    mergedItemDetail,
+    getItem,
     updateItemInCollection,
     findCollectionIdForItem,
   } = useCollectionsStore();
@@ -49,12 +50,8 @@ export function ItemDetailScreen() {
   const browse = route.params.browse === true;
   const collectionIdParam = route.params.collectionId;
 
-  const base = useMemo(
-    () => mergedItemDetail(route.params.id),
-    [mergedItemDetail, route.params.id],
-  );
-
-  const [likes, setLikes] = useState(base.likes);
+  const itemId = Number(route.params.id);
+  const base = useMemo(() => (Number.isFinite(itemId) ? getItem(itemId) : null), [getItem, itemId]);
   const [isLiked, setIsLiked] = useState(false);
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [commentDraft, setCommentDraft] = useState("");
@@ -65,25 +62,15 @@ export function ItemDetailScreen() {
     name: "",
     category: "",
     price: "",
-    year: "",
-    condition: "",
     description: "",
     image: "",
-    purchasePrice: "",
-    currentValue: "",
   });
-
-  useEffect(() => {
-    const m = mergedItemDetail(route.params.id);
-    setLikes(m.likes);
-  }, [mergedItemDetail, route.params.id]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setIsLoadingComments(true);
       try {
-        const itemId = Number(route.params.id);
         if (!Number.isFinite(itemId)) {
           setComments([]);
           return;
@@ -106,17 +93,11 @@ export function ItemDetailScreen() {
     return () => {
       cancelled = true;
     };
-  }, [authToken, route.params.id]);
+  }, [authToken, itemId]);
 
-  const inWishlist = isInWishlist(base.id);
+  const inWishlist = base ? isInWishlist(base.id) : false;
 
-  const appreciation = useMemo(() => {
-    const pp = base.purchasePrice;
-    if (!pp || pp <= 0) {
-      return "0";
-    }
-    return (((base.currentValue - pp) / pp) * 100).toFixed(1);
-  }, [base.currentValue, base.purchasePrice]);
+  const likesLabel = useMemo(() => (isLiked ? "Вы поставили лайк" : "Лайк"), [isLiked]);
 
   const requireAuth = useCallback(
     (action: () => void) => {
@@ -131,58 +112,45 @@ export function ItemDetailScreen() {
 
   const openEdit = useCallback(() => {
     requireAuth(() => {
+      if (!base) return;
       setEditDraft({
         name: base.name,
         category: base.category,
         price: String(base.price),
-        year: String(base.year),
-        condition: base.condition,
         description: base.description,
-        image: base.image,
-        purchasePrice: String(base.purchasePrice),
-        currentValue: String(base.currentValue),
+        image: base.imageUrl,
       });
       setEditOpen(true);
     });
   }, [base, requireAuth]);
 
   const saveEdit = useCallback(() => {
+    if (!base) return;
     const cid = collectionIdParam ?? findCollectionIdForItem(base.id);
     if (!cid) {
       Alert.alert("Нельзя сохранить", "Не удалось определить коллекцию для этого предмета.");
       return;
     }
     const price = Number.parseFloat(editDraft.price.replace(/\s/g, "").replace(",", "."));
-    const year = Number.parseInt(editDraft.year, 10);
-    const purchasePrice = Number.parseFloat(editDraft.purchasePrice.replace(/\s/g, "").replace(",", "."));
-    const currentValue = Number.parseFloat(editDraft.currentValue.replace(/\s/g, "").replace(",", "."));
-    if (!editDraft.name.trim() || Number.isNaN(price) || Number.isNaN(year)) {
-      Alert.alert("Проверьте данные", "Укажите название, цену и год.");
+    if (!editDraft.name.trim() || Number.isNaN(price)) {
+      Alert.alert("Проверьте данные", "Укажите название и цену.");
       return;
     }
-    if (Number.isNaN(purchasePrice) || Number.isNaN(currentValue)) {
-      Alert.alert("Проверьте данные", "Укажите корректные суммы для оценки.");
-      return;
-    }
-    const idStr = String(base.id);
     updateItemInCollection(cid, base.id, {
       name: editDraft.name.trim(),
       category: editDraft.category.trim() || "—",
       price,
-      year,
-      condition: editDraft.condition.trim() || "—",
-      image: editDraft.image.trim() || base.image,
+      description: editDraft.description.trim(),
+      imageUrl: editDraft.image.trim() || base.imageUrl,
     });
     setEditOpen(false);
-  }, [base.id, base.image, collectionIdParam, editDraft, findCollectionIdForItem, updateItemInCollection]);
+  }, [base, collectionIdParam, editDraft, findCollectionIdForItem, updateItemInCollection]);
 
   const handleLike = () => {
     requireAuth(() => {
       const next = !isLiked;
       setIsLiked(next);
-      setLikes(next ? likes + 1 : Math.max(0, likes - 1));
       if (!authToken) return;
-      const itemId = Number(route.params.id);
       if (!Number.isFinite(itemId)) return;
       void (next ? likeItemApi({ token: authToken, itemId }) : unlikeItemApi({ token: authToken, itemId })).catch(() => {});
     });
@@ -190,12 +158,13 @@ export function ItemDetailScreen() {
 
   const handleWishlistToggle = useCallback(() => {
     requireAuth(() => {
+      if (!base) return;
       void toggleWishlist({
         id: base.id,
         name: base.name,
         category: base.category,
-        estimatedPrice: base.currentValue,
-        image: base.image,
+        estimatedPrice: base.price,
+        image: base.imageUrl,
         notes: "",
       });
     });
@@ -211,11 +180,10 @@ export function ItemDetailScreen() {
       setComments((prev) => [...prev, optimistic]);
       setCommentDraft("");
       if (!authToken) return;
-      const itemId = Number(route.params.id);
       if (!Number.isFinite(itemId)) return;
       void createItemCommentApi({ token: authToken, itemId, text: t }).catch(() => {});
     });
-  }, [authToken, commentDraft, requireAuth, route.params.id]);
+  }, [authToken, commentDraft, itemId, requireAuth]);
 
   const showEdit = canInteract && !browse;
 
@@ -268,37 +236,26 @@ export function ItemDetailScreen() {
             </View>
           ) : null}
 
-          <View style={styles.hero}>
-            <ImageWithFallback uri={base.image} style={styles.heroImg} />
-          </View>
+          {base ? (
+            <View style={styles.hero}>
+              <ImageWithFallback uri={base.imageUrl} style={styles.heroImg} />
+            </View>
+          ) : (
+            <View style={styles.hero} />
+          )}
 
           <View style={styles.body}>
             <View style={styles.titleRow}>
-              <Text style={styles.title}>{base.name}</Text>
-              <Text style={styles.price}>{formatMoney(base.price)}</Text>
+              <Text style={styles.title}>{base?.name ?? "Предмет"}</Text>
+              <Text style={styles.price}>{formatMoney(base?.price ?? 0)}</Text>
             </View>
             <Text style={styles.metaLine}>
-              {base.category} • {base.year} • {base.condition}
+              {base?.category ?? "—"}
             </Text>
-
-            <View style={styles.statsRow}>
-              <View style={styles.statBox}>
-                <Text style={styles.statLab}>Цена покупки</Text>
-                <Text style={styles.statVal}>{formatMoney(base.purchasePrice)}</Text>
-              </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statLab}>Текущая стоимость</Text>
-                <Text style={styles.statVal}>{formatMoney(base.currentValue)}</Text>
-              </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statLab}>Прирост</Text>
-                <Text style={[styles.statVal, { color: theme.primary }]}>+{appreciation}%</Text>
-              </View>
-            </View>
 
             <View style={styles.block}>
               <Text style={styles.blockTitle}>Описание</Text>
-              <Text style={styles.desc}>{base.description}</Text>
+              <Text style={styles.desc}>{base?.description?.trim() ? base.description : "—"}</Text>
             </View>
 
             <View style={styles.block}>
@@ -311,7 +268,7 @@ export function ItemDetailScreen() {
                     fill={isLiked ? theme.primary : "transparent"}
                   />
                   <Text style={styles.socialText}>
-                    {likes} {pluralRu(likes, ["лайк", "лайка", "лайков"])}
+                    {likesLabel}
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={handleWishlistToggle} style={styles.socialBtn} disabled={!canInteract}>
@@ -331,15 +288,30 @@ export function ItemDetailScreen() {
                 </View>
               </View>
 
-              {comments.map((c) => (
-                <View key={c.id} style={styles.commentCard}>
-                  <View style={styles.commentTop}>
-                    <Text style={styles.commentUser}>{c.user}</Text>
-                    <Text style={styles.commentTime}>{c.time}</Text>
-                  </View>
-                  <Text style={styles.commentText}>{c.text}</Text>
+              {isLoadingComments ? (
+                <View style={{ gap: 10 }}>
+                  {[0, 1, 2].map((i) => (
+                    <View key={i} style={styles.commentCard}>
+                      <View style={styles.commentTop}>
+                        <Skeleton style={{ height: 12, width: "40%" }} />
+                        <Skeleton style={{ height: 12, width: "25%" }} />
+                      </View>
+                      <Skeleton style={{ height: 10, width: "92%", marginTop: 6 }} />
+                      <Skeleton style={{ height: 10, width: "78%", marginTop: 6 }} />
+                    </View>
+                  ))}
                 </View>
-              ))}
+              ) : (
+                comments.map((c) => (
+                  <View key={c.id} style={styles.commentCard}>
+                    <View style={styles.commentTop}>
+                      <Text style={styles.commentUser}>{c.user}</Text>
+                      <Text style={styles.commentTime}>{c.time}</Text>
+                    </View>
+                    <Text style={styles.commentText}>{c.text}</Text>
+                  </View>
+                ))
+              )}
 
               <View style={styles.composerRow}>
                 <TextInput
@@ -348,19 +320,19 @@ export function ItemDetailScreen() {
                   placeholder={canInteract ? "Комментарий…" : "Войдите, чтобы комментировать"}
                   placeholderTextColor={theme.mutedForeground}
                   style={styles.composerInput}
-                  editable={canInteract}
+                  editable={canInteract && !isLoadingComments}
                 />
                 <TouchableOpacity
                   style={[styles.composerSend, !canInteract && { opacity: 0.45 }]}
                   onPress={submitComment}
-                  disabled={!canInteract}
+                  disabled={!canInteract || isLoadingComments}
                 >
                   <Text style={styles.composerSendText}>Отпр.</Text>
                 </TouchableOpacity>
               </View>
             </View>
 
-            {showEdit ? (
+            {showEdit && base ? (
               <TouchableOpacity style={styles.editBtn} activeOpacity={0.9} onPress={openEdit}>
                 <Edit size={20} color={theme.primaryForeground} style={{ marginRight: 8 }} />
                 <Text style={styles.editBtnText}>Редактировать предмет</Text>
@@ -404,37 +376,6 @@ export function ItemDetailScreen() {
                     value={editDraft.price}
                     onChangeText={(t) => setEditDraft((d) => ({ ...d, price: t }))}
                     placeholder="Оценочная цена (USD)"
-                    keyboardType="decimal-pad"
-                    placeholderTextColor={theme.mutedForeground}
-                    style={styles.editInput}
-                  />
-                  <TextInput
-                    value={editDraft.year}
-                    onChangeText={(t) => setEditDraft((d) => ({ ...d, year: t }))}
-                    placeholder="Год"
-                    keyboardType="number-pad"
-                    placeholderTextColor={theme.mutedForeground}
-                    style={styles.editInput}
-                  />
-                  <TextInput
-                    value={editDraft.condition}
-                    onChangeText={(t) => setEditDraft((d) => ({ ...d, condition: t }))}
-                    placeholder="Состояние"
-                    placeholderTextColor={theme.mutedForeground}
-                    style={styles.editInput}
-                  />
-                  <TextInput
-                    value={editDraft.purchasePrice}
-                    onChangeText={(t) => setEditDraft((d) => ({ ...d, purchasePrice: t }))}
-                    placeholder="Цена покупки (USD)"
-                    keyboardType="decimal-pad"
-                    placeholderTextColor={theme.mutedForeground}
-                    style={styles.editInput}
-                  />
-                  <TextInput
-                    value={editDraft.currentValue}
-                    onChangeText={(t) => setEditDraft((d) => ({ ...d, currentValue: t }))}
-                    placeholder="Текущая стоимость (USD)"
                     keyboardType="decimal-pad"
                     placeholderTextColor={theme.mutedForeground}
                     style={styles.editInput}

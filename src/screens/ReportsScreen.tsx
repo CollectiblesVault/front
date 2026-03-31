@@ -1,5 +1,5 @@
 import { useFocusEffect } from "@react-navigation/native";
-import { Calendar, Filter, TrendingDown, TrendingUp } from "lucide-react-native";
+import { Calendar, Filter } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -19,10 +19,10 @@ import { BottomNav } from "../components/BottomNav";
 import { TabAwareScrollView } from "../components/TabAwareScrollView";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { DonutChart } from "../components/DonutChart";
+import { ErrorState } from "../components/ErrorState";
+import { LoadingState } from "../components/LoadingState";
 import { useAppSettings } from "../context/app-settings-context";
-import { useCollectionsStore } from "../context/collections-store-context";
-import { useWishlist } from "../context/wishlist-context";
-import { reportsSummaryApi, reportsSummaryCsvApi } from "../api/vaultApi";
+import { reportsActivityApi, reportsSummaryApi, reportsSummaryCsvApi } from "../api/vaultApi";
 import { theme } from "../theme";
 
 type TimeRange = "week" | "month" | "year";
@@ -67,6 +67,10 @@ export function ReportsScreen() {
   const [timeRange, setTimeRange] = useState<TimeRange>("month");
   const [filterOpen, setFilterOpen] = useState(false);
   const [sections, setSections] = useState<ReportSections>(defaultSections);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<any | null>(null);
+  const [activity, setActivity] = useState<any | null>(null);
 
   const portfolioAnim = useEnterAnim(40);
   const growthAnim = useEnterAnim(80);
@@ -76,68 +80,29 @@ export function ReportsScreen() {
   const donutSpin = useRef(new Animated.Value(0)).current;
   const barsProgress = useRef(new Animated.Value(0)).current;
 
-  const { collectionsList } = useCollectionsStore();
-  const { entries: wishlistEntries } = useWishlist();
-
-  const totalCollections = collectionsList.length;
-  const totalItems = collectionsList.reduce((s, c) => s + c.itemCount, 0);
-  const totalValue = collectionsList.reduce((s, c) => s + c.totalValue, 0);
-  const wishlistCount = wishlistEntries.length;
-
   const rangeLabel = (r: TimeRange) => (r === "week" ? "7 дней" : r === "month" ? "30 дней" : "1 год");
 
-  const changeSeries = useMemo(() => {
-    const len = timeRange === "week" ? 7 : timeRange === "month" ? 4 : 12;
-    const labels =
-      timeRange === "week"
-        ? ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-        : timeRange === "month"
-          ? ["Нед. 1", "Нед. 2", "Нед. 3", "Нед. 4"]
-          : ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"];
+  const series = useMemo(() => {
+    const raw = activity?.series ?? activity?.data ?? activity?.items ?? null;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((r: any) => ({
+        label: String(r?.label ?? r?.interval ?? r?.date ?? ""),
+        items: Number(r?.items ?? r?.items_count ?? r?.itemsDelta ?? 0) || 0,
+      }))
+      .filter((r: any) => r.label);
+  }, [activity]);
 
-    // Детерминированные (не зависящие от реального времени) изменения, чтобы отчёт всегда имел данные.
-    const seed = totalItems * 13 + totalCollections * 17 + wishlistCount * 19;
-    const mk = (i: number) => Math.abs(Math.sin(seed + i * 1.37)) + 0.15; // 0..~1
-
-    const collectionsBase = Math.max(1, Math.round(totalCollections * 0.6));
-    const itemsBase = Math.max(1, Math.round(totalItems * 0.35));
-    const likesBase = Math.max(1, Math.round(totalItems * 0.08 + wishlistCount * 0.7));
-    const commentsBase = Math.max(1, Math.round(totalItems * 0.02 + wishlistCount * 0.25));
-    const wishlistBase = Math.max(1, Math.round(wishlistCount * 1.2 + totalItems * 0.01));
-
-    return Array.from({ length: len }, (_, i) => {
-      const j = mk(i);
-      const collectionsDelta = Math.max(0, Math.round((collectionsBase / len) * (0.7 + j)));
-      const itemsDelta = Math.max(0, Math.round((itemsBase / len) * (0.75 + j)));
-      const likesDelta = Math.max(0, Math.round((likesBase / len) * (0.6 + j)));
-      const commentsDelta = Math.max(0, Math.round((commentsBase / len) * (0.65 + j)));
-      const wishlistDelta = Math.max(0, Math.round((wishlistBase / len) * (0.7 + j)));
-
-      return {
-        label: labels[i] ?? `T${i + 1}`,
-        collectionsDelta,
-        itemsDelta,
-        likesDelta,
-        commentsDelta,
-        wishlistDelta,
-      };
-    });
-  }, [timeRange, totalCollections, totalItems, totalValue, wishlistCount]);
-
-  const maxBar = useMemo(() => Math.max(...changeSeries.map((d) => d.itemsDelta)), [changeSeries]);
+  const maxBar = useMemo(() => Math.max(1, ...series.map((d: any) => d.items)), [series]);
 
   const donutLegend = useMemo(() => {
-    const sums = changeSeries.reduce(
-      (acc, r) => {
-        acc.collections += r.collectionsDelta;
-        acc.items += r.itemsDelta;
-        acc.likes += r.likesDelta;
-        acc.comments += r.commentsDelta;
-        acc.wishlist += r.wishlistDelta;
-        return acc;
-      },
-      { collections: 0, items: 0, likes: 0, comments: 0, wishlist: 0 },
-    );
+    const sums = {
+      collections: Number(summary?.collections ?? summary?.collections_count ?? 0) || 0,
+      items: Number(summary?.items ?? summary?.items_count ?? 0) || 0,
+      likes: Number(summary?.likes ?? summary?.likes_count ?? 0) || 0,
+      comments: Number(summary?.comments ?? summary?.comments_count ?? 0) || 0,
+      wishlist: Number(summary?.wishlist ?? summary?.wishlist_count ?? 0) || 0,
+    };
 
     const palette = [
       { label: "Коллекции", key: "collections" as const, color: theme.primary },
@@ -152,7 +117,7 @@ export function ReportsScreen() {
       value: sums[p.key],
       color: p.color,
     }));
-  }, [changeSeries]);
+  }, [summary]);
 
   const donutData = useMemo(
     () =>
@@ -163,100 +128,17 @@ export function ReportsScreen() {
     [donutLegend],
   );
 
-  const buildExportCsv = useCallback(() => {
-    const username = userProfile?.displayName ?? "Пользователь";
-    const header = [
-      "Пользователь",
-      "Период",
-      "Интервал",
-      "Коллекции",
-      "Предметы",
-      "Лайки",
-      "Комментарии",
-      "В желаниях",
-      "Итого",
-    ];
-
-    const calcSeriesFor = (r: TimeRange) => {
-      const len = r === "week" ? 7 : r === "month" ? 4 : 12;
-      const labels =
-        r === "week"
-          ? ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-          : r === "month"
-            ? ["Нед. 1", "Нед. 2", "Нед. 3", "Нед. 4"]
-            : ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"];
-
-      const seed = totalItems * 13 + totalCollections * 17 + wishlistCount * 19;
-      const mk = (i: number) => Math.abs(Math.sin(seed + i * 1.37)) + 0.15;
-
-      const collectionsBase = Math.max(1, Math.round(totalCollections * 0.6));
-      const itemsBase = Math.max(1, Math.round(totalItems * 0.35));
-      const likesBase = Math.max(1, Math.round(totalItems * 0.08 + wishlistCount * 0.7));
-      const commentsBase = Math.max(1, Math.round(totalItems * 0.02 + wishlistCount * 0.25));
-      const wishlistBase = Math.max(1, Math.round(wishlistCount * 1.2 + totalItems * 0.01));
-
-      return Array.from({ length: len }, (_, i) => {
-        const j = mk(i);
-        const collectionsDelta = Math.max(0, Math.round((collectionsBase / len) * (0.7 + j)));
-        const itemsDelta = Math.max(0, Math.round((itemsBase / len) * (0.75 + j)));
-        const likesDelta = Math.max(0, Math.round((likesBase / len) * (0.6 + j)));
-        const commentsDelta = Math.max(0, Math.round((commentsBase / len) * (0.65 + j)));
-        const wishlistDelta = Math.max(0, Math.round((wishlistBase / len) * (0.7 + j)));
-        return {
-          interval: labels[i] ?? `T${i + 1}`,
-          collectionsDelta,
-          itemsDelta,
-          likesDelta,
-          commentsDelta,
-          wishlistDelta,
-        };
-      });
-    };
-
-    const ranges: TimeRange[] = ["week", "month", "year"];
-    const rows: string[] = [];
-
-    for (const r of ranges) {
-      const series = calcSeriesFor(r);
-      for (const it of series) {
-        const total = it.collectionsDelta + it.itemsDelta + it.likesDelta + it.commentsDelta + it.wishlistDelta;
-        rows.push(
-          [
-            username,
-            rangeLabel(r),
-            it.interval,
-            it.collectionsDelta,
-            it.itemsDelta,
-            it.likesDelta,
-            it.commentsDelta,
-            it.wishlistDelta,
-            total,
-          ].join(";"),
-        );
-      }
-    }
-
-    // Короткая строка итогов по всем данным пользователя.
-    rows.push(["", "Итоги", "", totalCollections, totalItems, "", "", wishlistCount, ""].join(";"));
-
-    return [header.join(";"), ...rows].join("\n");
-  }, [rangeLabel, userProfile?.displayName, totalCollections, totalItems, wishlistCount]);
-
   const handleExport = useCallback(async () => {
     try {
-      let csv = buildExportCsv();
-      if (authToken != null) {
-        try {
-          csv = await Promise.all([
-            reportsSummaryCsvApi({ token: authToken, period: "week" }),
-            reportsSummaryCsvApi({ token: authToken, period: "month" }),
-            reportsSummaryCsvApi({ token: authToken, period: "year" }),
-          ]).then((parts) => parts.join("\n"));
-        } catch {
-          // If API export fails (e.g. 401/500), keep local CSV fallback.
-          csv = buildExportCsv();
-        }
+      if (authToken == null) {
+        Alert.alert("Нужен вход", "Экспорт отчётов доступен после входа.");
+        return;
       }
+      const csv = await Promise.all([
+        reportsSummaryCsvApi({ token: authToken, period: "week" }),
+        reportsSummaryCsvApi({ token: authToken, period: "month" }),
+        reportsSummaryCsvApi({ token: authToken, period: "year" }),
+      ]).then((parts) => parts.join("\n"));
 
       // Web: создаём файл через Blob и запускаем скачивание.
       if (Platform.OS === "web") {
@@ -293,7 +175,7 @@ export function ReportsScreen() {
     } catch {
       Alert.alert("Не удалось поделиться", "Попробуйте ещё раз.");
     }
-  }, [buildExportCsv]);
+  }, [authToken]);
 
   const toggleSection = useCallback((key: keyof ReportSections) => {
     setSections((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -306,11 +188,26 @@ export function ReportsScreen() {
   }, []);
 
   const refreshStatsFromApi = useCallback(async () => {
+    if (authToken == null) {
+      setSummary(null);
+      setActivity(null);
+      setIsLoading(false);
+      setError(null);
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
     try {
-      // Required by product behavior: refresh stats from backend every time reports screen is opened.
-      await reportsSummaryApi({ token: authToken, period: timeRange });
-    } catch {
-      // Keep screen functional with local computed fallback if backend is unavailable.
+      const [s, a] = await Promise.all([
+        reportsSummaryApi({ token: authToken, period: timeRange }),
+        reportsActivityApi({ token: authToken, period: timeRange }),
+      ]);
+      setSummary(s ?? null);
+      setActivity(a ?? null);
+    } catch (e: any) {
+      setError(e?.message ? String(e.message) : "Не удалось загрузить отчёт.");
+    } finally {
+      setIsLoading(false);
     }
   }, [authToken, timeRange]);
 
@@ -380,114 +277,121 @@ export function ReportsScreen() {
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 96, gap: 24 }}
         showsVerticalScrollIndicator={false}
       >
-        {sections.portfolioCard ? (
-          <Animated.View
-            style={[
-              styles.card,
-              {
-                opacity: portfolioAnim.opacity,
-                transform: [
-                  { translateY: portfolioAnim.translateY },
-                  { scale: portfolioAnim.scale },
-                ],
-              },
-            ]}
-          >
-            <Text style={styles.cardKicker}>Общая стоимость по вашим коллекциям</Text>
-            <Text style={styles.bigValue}>{formatMoney(totalValue)}</Text>
-            <View style={styles.trendRow}>
-              <Text style={styles.vs}>
-                {totalCollections} коллекций • {totalItems} предметов • {wishlistCount} желаний
-              </Text>
-            </View>
-          </Animated.View>
-        ) : null}
+        {error ? <ErrorState message={error} onRetry={refreshStatsFromApi} /> : null}
+        {isLoading ? <LoadingState /> : null}
+        {!isLoading && !error ? (
+          <>
+            {sections.portfolioCard ? (
+              <Animated.View
+                style={[
+                  styles.card,
+                  {
+                    opacity: portfolioAnim.opacity,
+                    transform: [
+                      { translateY: portfolioAnim.translateY },
+                      { scale: portfolioAnim.scale },
+                    ],
+                  },
+                ]}
+              >
+                <Text style={styles.cardKicker}>Общая стоимость по вашим коллекциям</Text>
+                <Text style={styles.bigValue}>
+                  {formatMoney(Number(summary?.total_value_usd ?? summary?.totalValueUsd ?? 0) || 0)}
+                </Text>
+                <View style={styles.trendRow}>
+                  <Text style={styles.vs}>
+                    {Number(summary?.collections ?? summary?.collections_count ?? 0) || 0} коллекций •{" "}
+                    {Number(summary?.items ?? summary?.items_count ?? 0) || 0} предметов •{" "}
+                    {Number(summary?.wishlist ?? summary?.wishlist_count ?? 0) || 0} желаний
+                  </Text>
+                </View>
+              </Animated.View>
+            ) : null}
 
-        {sections.growthChart ? (
-          <Animated.View
-            style={[
-              styles.card,
-              {
-                opacity: growthAnim.opacity,
-                transform: [{ translateY: growthAnim.translateY }, { scale: growthAnim.scale }],
-              },
-            ]}
-          >
-            <Text style={styles.cardTitle}>Изменения за период</Text>
-            <View style={styles.chartArea}>
-              {changeSeries.map((d) => {
-                const h = Math.round((d.itemsDelta / maxBar) * 160);
-                return (
-                  <View key={d.label} style={styles.barCol}>
-                    <Animated.View style={[styles.bar, { height: h, transform: [{ scaleY: barsProgress }] }]} />
-                    <Text style={styles.barLabel}>{d.label}</Text>
+            {sections.growthChart ? (
+              <Animated.View
+                style={[
+                  styles.card,
+                  {
+                    opacity: growthAnim.opacity,
+                    transform: [{ translateY: growthAnim.translateY }, { scale: growthAnim.scale }],
+                  },
+                ]}
+              >
+                <Text style={styles.cardTitle}>Изменения за период</Text>
+                <View style={styles.chartArea}>
+                  {series.map((d: any) => {
+                    const h = Math.round((d.items / maxBar) * 160);
+                    return (
+                      <View key={d.label} style={styles.barCol}>
+                        <Animated.View style={[styles.bar, { height: h, transform: [{ scaleY: barsProgress }] }]} />
+                        <Text style={styles.barLabel}>{d.label}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              </Animated.View>
+            ) : null}
+
+            {sections.categories ? (
+              <Animated.View
+                style={[
+                  styles.card,
+                  {
+                    opacity: categoriesAnim.opacity,
+                    transform: [{ translateY: categoriesAnim.translateY }, { scale: categoriesAnim.scale }],
+                  },
+                ]}
+              >
+                <Text style={styles.cardTitle}>Распределение активности</Text>
+                <View style={styles.pieRow}>
+                  <View style={styles.pieWrap}>
+                    <Animated.View style={{ transform: [{ rotate: donutRotation }] }}>
+                      <DonutChart data={donutData} size={140} />
+                    </Animated.View>
                   </View>
-                );
-              })}
-            </View>
-          </Animated.View>
-        ) : null}
-
-        {sections.categories ? (
-          <Animated.View
-            style={[
-              styles.card,
-              {
-                opacity: categoriesAnim.opacity,
-                transform: [{ translateY: categoriesAnim.translateY }, { scale: categoriesAnim.scale }],
-              },
-            ]}
-          >
-            <Text style={styles.cardTitle}>Распределение активности</Text>
-            <View style={styles.pieRow}>
-              <View style={styles.pieWrap}>
-                <Animated.View style={{ transform: [{ rotate: donutRotation }] }}>
-                  <DonutChart data={donutData} size={140} />
-                </Animated.View>
-              </View>
-              <View style={styles.legend}>
-                {donutLegend.map((s) => (
-                  <View key={s.label} style={styles.legendRow}>
-                    <View style={styles.legendLeft}>
-                      <View style={[styles.dot, { backgroundColor: s.color }]} />
-                      <Text style={styles.legendName} numberOfLines={1}>
-                        {s.label}
-                      </Text>
-                    </View>
-                    <Text style={styles.legendVal}>{s.value}</Text>
+                  <View style={styles.legend}>
+                    {donutLegend.map((s) => (
+                      <View key={s.label} style={styles.legendRow}>
+                        <View style={styles.legendLeft}>
+                          <View style={[styles.dot, { backgroundColor: s.color }]} />
+                          <Text style={styles.legendName} numberOfLines={1}>
+                            {s.label}
+                          </Text>
+                        </View>
+                        <Text style={styles.legendVal}>{s.value}</Text>
+                      </View>
+                    ))}
                   </View>
-                ))}
-              </View>
-            </View>
-          </Animated.View>
-        ) : null}
+                </View>
+              </Animated.View>
+            ) : null}
 
-        {sections.topPerformers ? (
-          <Animated.View
-            style={[
-              styles.card,
-              {
-                opacity: topAnim.opacity,
-                transform: [{ translateY: topAnim.translateY }, { scale: topAnim.scale }],
-              },
-            ]}
-          >
-            <Text style={styles.cardTitle}>Итоги по действиям</Text>
-            <View style={{ gap: 10 }}>
-              <Text style={styles.vs}>
-                Лайки:{" "}
-                {changeSeries.reduce((s, r) => s + r.likesDelta, 0)}
-              </Text>
-              <Text style={styles.vs}>
-                Комментарии:{" "}
-                {changeSeries.reduce((s, r) => s + r.commentsDelta, 0)}
-              </Text>
-              <Text style={styles.vs}>
-                В желаниях:{" "}
-                {changeSeries.reduce((s, r) => s + r.wishlistDelta, 0)}
-              </Text>
-            </View>
-          </Animated.View>
+            {sections.topPerformers ? (
+              <Animated.View
+                style={[
+                  styles.card,
+                  {
+                    opacity: topAnim.opacity,
+                    transform: [{ translateY: topAnim.translateY }, { scale: topAnim.scale }],
+                  },
+                ]}
+              >
+                <Text style={styles.cardTitle}>Итоги по действиям</Text>
+                <View style={{ gap: 10 }}>
+                  <Text style={styles.vs}>
+                    Лайки: {Number(summary?.likes ?? summary?.likes_count ?? 0) || 0}
+                  </Text>
+                  <Text style={styles.vs}>
+                    Комментарии: {Number(summary?.comments ?? summary?.comments_count ?? 0) || 0}
+                  </Text>
+                  <Text style={styles.vs}>
+                    В желаниях: {Number(summary?.wishlist ?? summary?.wishlist_count ?? 0) || 0}
+                  </Text>
+                </View>
+              </Animated.View>
+            ) : null}
+          </>
         ) : null}
 
         <TouchableOpacity

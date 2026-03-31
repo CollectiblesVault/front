@@ -20,7 +20,7 @@ export interface CollectionRow {
   name: string;
   itemCount: number;
   totalValue: number;
-  image: string;
+  imageUrl: string;
   isPublic: boolean;
 }
 
@@ -30,28 +30,13 @@ export interface CollectionItemRow {
   category: string;
   categoryId?: number | null;
   price: number;
-  year: number;
-  condition: string;
-  image: string;
+  description: string;
+  imageUrl: string;
   isWishlisted: boolean;
 }
 
-/** Поля карточки предмета + расширение для экрана детали (мержится с моком). */
-export type ItemDetailOverride = Partial<{
-  name: string;
-  category: string;
-  price: number;
-  year: number;
-  condition: string;
-  description: string;
-  image: string;
-  purchasePrice: number;
-  currentValue: number;
-  likes: number;
-}>;
-
-const DEFAULT_COLLECTION_IMAGE = (id: number) => `https://picsum.photos/seed/collection-${id}/900/900`;
-const DEFAULT_ITEM_IMAGE = (id: number) => `https://picsum.photos/seed/item-${id}/900/900`;
+const DEFAULT_COLLECTION_IMAGE = "";
+const DEFAULT_ITEM_IMAGE = "";
 
 const EMPTY_ITEMS: CollectionItemRow[] = [];
 
@@ -84,7 +69,7 @@ function normalizeItem(raw: any): {
   name: string;
   description: string;
   price: number;
-  image: string;
+  imageUrl: string;
 } | null {
   const id = safeNumber(raw?.id ?? raw?.item_id, NaN);
   if (!Number.isFinite(id)) return null;
@@ -93,8 +78,8 @@ function normalizeItem(raw: any): {
   const name = safeString(raw?.name, "").trim() || `Предмет ${id}`;
   const description = safeString(raw?.description, "");
   const price = safeNumber(raw?.price, 0);
-  const image = safeString(raw?.image_url ?? raw?.image, "").trim() || DEFAULT_ITEM_IMAGE(id);
-  return { id, collectionId, categoryId, name, description, price, image };
+  const imageUrl = safeString(raw?.image_url ?? raw?.image, "").trim() || DEFAULT_ITEM_IMAGE;
+  return { id, collectionId, categoryId, name, description, price, imageUrl };
 }
 
 type MergedDetail = {
@@ -102,16 +87,8 @@ type MergedDetail = {
   name: string;
   category: string;
   price: number;
-  year: number;
-  condition: string;
   description: string;
-  acquired: string;
-  purchasePrice: number;
-  currentValue: number;
-  image: string;
-  isWishlisted: boolean;
-  likes: number;
-  comments: { id: number; user: string; text: string; time: string }[];
+  imageUrl: string;
 };
 
 interface CollectionsStoreValue {
@@ -139,7 +116,7 @@ interface CollectionsStoreValue {
     patch: Partial<CollectionItemRow>,
   ) => Promise<void>;
   deleteItemFromCollection: (collectionId: string, itemId: number) => Promise<void>;
-  mergedItemDetail: (itemIdStr: string) => MergedDetail;
+  getItem: (itemId: number) => MergedDetail | null;
   findCollectionIdForItem: (itemId: number) => string | undefined;
 }
 
@@ -203,9 +180,8 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
           category: catName,
           categoryId: it.categoryId,
           price: it.price,
-          year: new Date().getFullYear(),
-          condition: "—",
-          image: it.image,
+          description: it.description,
+          imageUrl: it.imageUrl,
           isWishlisted: false,
         };
         byCollection[key] = [...(byCollection[key] ?? []), row];
@@ -242,7 +218,7 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
         name: c.name,
         itemCount: items.length,
         totalValue: items.reduce((s, i) => s + i.price, 0),
-        image: DEFAULT_COLLECTION_IMAGE(c.id),
+        imageUrl: DEFAULT_COLLECTION_IMAGE,
         isPublic: c.isPublic,
       };
       });
@@ -271,7 +247,7 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
     (collectionId: string | undefined) => {
       const n = Number(collectionId);
       const c = collectionsList.find((x) => x.id === n);
-      return c?.image ?? DEFAULT_COLLECTION_IMAGE(n || 0);
+      return c?.imageUrl ?? DEFAULT_COLLECTION_IMAGE;
     },
     [collectionsList],
   );
@@ -391,7 +367,7 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
         category_id: categoryId,
         name,
           price: row.price,
-        image_url: row.image?.trim() ? row.image.trim() : null,
+        image_url: row.imageUrl?.trim() ? row.imageUrl.trim() : null,
         description: row.description?.trim() ? row.description.trim() : null,
       });
       const newId = safeNumber(created?.id ?? created?.item_id, 0);
@@ -417,8 +393,8 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
         item_id: itemId,
         name: nextName,
         price: nextPrice,
-        image_url: patch.image?.trim() ? patch.image.trim() : undefined,
-        description: undefined,
+        image_url: patch.imageUrl?.trim() ? patch.imageUrl.trim() : undefined,
+        description: patch.description?.trim() ? patch.description.trim() : undefined,
       });
       await refreshCollections();
     },
@@ -434,29 +410,18 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
     [authToken, refreshCollections],
   );
 
-  const mergedItemDetail = useCallback(
-    (itemIdStr: string): MergedDetail => {
-      const id = Number(itemIdStr);
-      const found = Object.values(itemsMap).flat().find((x) => x.id === id);
-      const catName = found?.category ?? "—";
-      const price = found?.price ?? 0;
-      const name = found?.name ?? `Предмет ${id}`;
-      const image = found?.image ?? DEFAULT_ITEM_IMAGE(id);
+  const getItem = useCallback(
+    (itemId: number): MergedDetail | null => {
+      if (!Number.isFinite(itemId)) return null;
+      const found = Object.values(itemsMap).flat().find((x) => x.id === itemId);
+      if (!found) return null;
       return {
-        id,
-        name,
-        category: catName,
-        price,
-        year: new Date().getFullYear(),
-        condition: "—",
-        description: "",
-        acquired: "—",
-        purchasePrice: price,
-        currentValue: price,
-        image,
-        isWishlisted: false,
-        likes: 0,
-        comments: [],
+        id: found.id,
+        name: found.name,
+        category: found.category,
+        price: found.price,
+        description: found.description,
+        imageUrl: found.imageUrl,
       };
     },
     [itemsMap],
@@ -480,7 +445,7 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
       renameCollection,
       addItemToCollection,
       updateItemInCollection,
-      mergedItemDetail,
+      getItem,
       deleteItemFromCollection,
       findCollectionIdForItem,
     }),
@@ -501,7 +466,7 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
       renameCollection,
       addItemToCollection,
       updateItemInCollection,
-      mergedItemDetail,
+      getItem,
       deleteItemFromCollection,
       findCollectionIdForItem,
     ],
