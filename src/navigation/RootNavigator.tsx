@@ -1,9 +1,12 @@
 import { NavigationContainer, DefaultTheme } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
+import { TabTransitionOverlay } from "../components/TabTransitionOverlay";
+import { useTabTransition } from "../context/tab-transition-context";
 import { CollectionDetailScreen } from "../screens/CollectionDetailScreen";
 import { CollectionsScreen } from "../screens/CollectionsScreen";
 import { CommunityScreen } from "../screens/CommunityScreen";
+import { AuctionScreen } from "../screens/AuctionScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { ItemDetailScreen } from "../screens/ItemDetailScreen";
 import { LoginScreen } from "../screens/LoginScreen";
@@ -31,28 +34,33 @@ const navTheme = {
 };
 
 export function RootNavigator() {
+  const { onNavigationStateChange } = useTabTransition();
   return (
-    <NavigationContainer theme={navTheme}>
-      <Stack.Navigator
-        initialRouteName="Welcome"
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: theme.background },
-          animation: "slide_from_right",
-        }}
-      >
-        <Stack.Screen name="Welcome" component={WelcomeScreen} />
-        <Stack.Screen name="Home" component={HomeScreen} />
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Collections" component={CollectionsScreen} />
-        <Stack.Screen name="CollectionDetail" component={CollectionDetailScreen} />
-        <Stack.Screen name="ItemDetail" component={ItemDetailScreen} />
-        <Stack.Screen name="Wishlist" component={WishlistScreen} />
-        <Stack.Screen name="Reports" component={ReportsScreen} />
-        <Stack.Screen name="Community" component={CommunityScreen} />
-        <Stack.Screen name="UserProfile" component={UserProfileScreen} />
-        <Stack.Screen name="OfflineDemo" component={OfflineDemoScreen} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <>
+      <NavigationContainer theme={navTheme} onStateChange={onNavigationStateChange}>
+        <Stack.Navigator
+          initialRouteName="Welcome"
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.background },
+            animation: "slide_from_right",
+          }}
+        >
+          <Stack.Screen name="Welcome" component={WelcomeScreen} />
+          <Stack.Screen name="Home" component={HomeScreen} />
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="Collections" component={CollectionsScreen} />
+          <Stack.Screen name="CollectionDetail" component={CollectionDetailScreen} />
+          <Stack.Screen name="ItemDetail" component={ItemDetailScreen} />
+          <Stack.Screen name="Wishlist" component={WishlistScreen} />
+          <Stack.Screen name="Reports" component={ReportsScreen} />
+          <Stack.Screen name="Community" component={CommunityScreen} />
+          <Stack.Screen name="Auction" component={AuctionScreen} />
+          <Stack.Screen name="UserProfile" component={UserProfileScreen} />
+          <Stack.Screen name="OfflineDemo" component={OfflineDemoScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
+      <TabTransitionOverlay />
+    </>
   );
 }

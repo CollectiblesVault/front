@@ -47,7 +47,7 @@ export function LoginScreen() {
 
   const finishAuth = async () => {
     const un = username.trim() || "Пользователь";
-    const em = (!isLogin ? email.trim() : `${un}`) || `${un}`;
+    const em = email.trim();
     const pwd = password;
 
     if (!pwd || pwd.length < 6) {
@@ -117,13 +117,27 @@ export function LoginScreen() {
         </View>
 
         <View style={styles.form}>
+          {!isLogin ? (
+            <View style={styles.field}>
+              <User size={20} color={theme.mutedForeground} style={styles.fieldIcon} />
+              <TextInput
+                value={username}
+                onChangeText={setUsername}
+                placeholder="Имя пользователя"
+                placeholderTextColor={theme.mutedForeground}
+                autoCapitalize="none"
+                style={styles.input}
+              />
+            </View>
+          ) : null}
           <View style={styles.field}>
-            <User size={20} color={theme.mutedForeground} style={styles.fieldIcon} />
+            <Mail size={20} color={theme.mutedForeground} style={styles.fieldIcon} />
             <TextInput
-              value={username}
-              onChangeText={setUsername}
-              placeholder="Имя пользователя"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="Email"
               placeholderTextColor={theme.mutedForeground}
+              keyboardType="email-address"
               autoCapitalize="none"
               style={styles.input}
             />
@@ -154,21 +168,6 @@ export function LoginScreen() {
               />
             </View>
           ) : null}
-          {!isLogin ? (
-            <View style={styles.field}>
-              <Mail size={20} color={theme.mutedForeground} style={styles.fieldIcon} />
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                placeholder="Email"
-                placeholderTextColor={theme.mutedForeground}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                style={styles.input}
-              />
-            </View>
-          ) : null}
-
           <TouchableOpacity
             style={styles.primaryBtn}
             onPress={finishAuth}

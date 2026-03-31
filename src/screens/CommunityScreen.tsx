@@ -1,15 +1,17 @@
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { ChevronRight, EyeOff, Search } from "lucide-react-native";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomNav } from "../components/BottomNav";
+import { ErrorState } from "../components/ErrorState";
+import { Skeleton } from "../components/Skeleton";
 import { ImageWithFallback } from "../components/ImageWithFallback";
 import { TabAwareScrollView } from "../components/TabAwareScrollView";
 import { useAppSettings } from "../context/app-settings-context";
-import { communityUsers, CURRENT_COMMUNITY_USER_ID } from "../data/mocks";
+import { getPublicUsersApi } from "../api/vaultApi";
 import type { RootStackParamList } from "../navigation/types";
 import { theme } from "../theme";
 
@@ -20,23 +22,55 @@ export function CommunityScreen() {
   const navigation = useNavigation<Nav>();
   const { hideFromSearch, formatMoney } = useAppSettings();
   const [query, setQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [users, setUsers] = useState<any[]>([]);
+
+  const load = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await getPublicUsersApi({ limit: 50, offset: 0 });
+      setUsers(res ?? []);
+    } catch (e: any) {
+      setError(e?.message ? String(e.message) : "Не удалось загрузить пользователей.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return communityUsers.filter((u) => {
-      if (u.isSelf && hideFromSearch) {
-        return false;
-      }
-      if (!q) {
-        return true;
-      }
+    const normalized = users.map((u) => {
+      const id = String(u?.id ?? "");
+      return {
+        id,
+        displayName: String(u?.display_name ?? u?.displayName ?? "Пользователь"),
+        handle: String(u?.handle ?? ""),
+        bio: String(u?.bio ?? ""),
+        avatar: String(u?.avatar_url ?? u?.avatar ?? ""),
+        collectionsCount: Number(u?.collections_count ?? u?.collectionsCount ?? 0) || 0,
+        itemsCount: Number(u?.items_count ?? u?.itemsCount ?? 0) || 0,
+        totalValueUsd: Number(u?.total_value_usd ?? u?.totalValueUsd ?? 0) || 0,
+        isSelf: Boolean(u?.is_self ?? u?.isSelf),
+      };
+    });
+
+    return normalized.filter((u) => {
+      if (u.isSelf && hideFromSearch) return false;
+      if (!q) return true;
       return (
         u.displayName.toLowerCase().includes(q) ||
         u.handle.toLowerCase().includes(q) ||
         u.bio.toLowerCase().includes(q)
       );
     });
-  }, [query, hideFromSearch]);
+  }, [query, hideFromSearch, users]);
 
   return (
     <View style={styles.root}>
@@ -65,7 +99,23 @@ export function CommunityScreen() {
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 96, gap: 10 }}
         showsVerticalScrollIndicator={false}
       >
-        {list.length === 0 ? (
+        {error ? (
+          <ErrorState message={error} onRetry={load} />
+        ) : isLoading ? (
+          <>
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <View key={i} style={styles.userCard}>
+                <Skeleton style={{ width: 52, height: 52, borderRadius: 26 }} radius={26} />
+                <View style={styles.userMid}>
+                  <Skeleton style={{ height: 14, width: "60%" }} />
+                  <Skeleton style={{ height: 10, width: "35%", marginTop: 8 }} />
+                  <Skeleton style={{ height: 10, width: "70%", marginTop: 8 }} />
+                </View>
+                <Skeleton style={{ width: 20, height: 20, borderRadius: 10 }} radius={10} />
+              </View>
+            ))}
+          </>
+        ) : list.length === 0 ? (
           <Text style={styles.empty}>Никого не найдено. Измените запрос или отключите скрытие профиля в настройках аккаунта.</Text>
         ) : (
           list.map((u) => (
@@ -79,7 +129,7 @@ export function CommunityScreen() {
               <View style={styles.userMid}>
                 <Text style={styles.name} numberOfLines={1}>
                   {u.displayName}
-                  {u.id === CURRENT_COMMUNITY_USER_ID ? " • вы" : ""}
+                  {u.isSelf ? " • вы" : ""}
                 </Text>
                 <Text style={styles.handle}>{u.handle}</Text>
                 <Text style={styles.stats}>

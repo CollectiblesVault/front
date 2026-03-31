@@ -24,7 +24,7 @@ import { TabAwareScrollView } from "../components/TabAwareScrollView";
 import { useAppSettings } from "../context/app-settings-context";
 import { useCollectionsStore } from "../context/collections-store-context";
 import { useWishlist } from "../context/wishlist-context";
-import { itemDetailById } from "../data/mocks";
+import { createItemCommentApi, getItemCommentsApi, likeItemApi, unlikeItemApi } from "../api/vaultApi";
 import type { RootStackParamList } from "../navigation/types";
 import { theme } from "../theme";
 import { pluralRu } from "../utils/pluralRu";
@@ -32,20 +32,17 @@ import { pluralRu } from "../utils/pluralRu";
 type Nav = NativeStackNavigationProp<RootStackParamList, "ItemDetail">;
 type R = RouteProp<RootStackParamList, "ItemDetail">;
 
-const defaultDetail = itemDetailById["1"]!;
-
 type CommentRow = { id: number; user: string; text: string; time: string };
 
 export function ItemDetailScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const route = useRoute<R>();
-  const { formatMoney, canInteract } = useAppSettings();
+  const { formatMoney, canInteract, authToken } = useAppSettings();
   const { isInWishlist, toggleWishlist } = useWishlist();
   const {
     mergedItemDetail,
     updateItemInCollection,
-    patchItemDetail,
     findCollectionIdForItem,
   } = useCollectionsStore();
 
@@ -59,8 +56,9 @@ export function ItemDetailScreen() {
 
   const [likes, setLikes] = useState(base.likes);
   const [isLiked, setIsLiked] = useState(false);
-  const [comments, setComments] = useState<CommentRow[]>(() => base.comments.map((c) => ({ ...c })));
+  const [comments, setComments] = useState<CommentRow[]>([]);
   const [commentDraft, setCommentDraft] = useState("");
+  const [isLoadingComments, setIsLoadingComments] = useState(true);
 
   const [editOpen, setEditOpen] = useState(false);
   const [editDraft, setEditDraft] = useState({
@@ -78,8 +76,37 @@ export function ItemDetailScreen() {
   useEffect(() => {
     const m = mergedItemDetail(route.params.id);
     setLikes(m.likes);
-    setComments(m.comments.map((c) => ({ ...c })));
   }, [mergedItemDetail, route.params.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setIsLoadingComments(true);
+      try {
+        const itemId = Number(route.params.id);
+        if (!Number.isFinite(itemId)) {
+          setComments([]);
+          return;
+        }
+        const list = await getItemCommentsApi({ itemId, token: authToken });
+        if (cancelled) return;
+        const mapped: CommentRow[] = (list ?? []).map((c: any, idx: number) => ({
+          id: typeof c?.id === "number" ? c.id : idx + 1,
+          user: typeof c?.user === "string" ? c.user : typeof c?.author === "string" ? c.author : "Пользователь",
+          text: typeof c?.text === "string" ? c.text : "",
+          time: typeof c?.created_at === "string" ? c.created_at : "—",
+        }));
+        setComments(mapped);
+      } catch {
+        if (!cancelled) setComments([]);
+      } finally {
+        if (!cancelled) setIsLoadingComments(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken, route.params.id]);
 
   const inWishlist = isInWishlist(base.id);
 
@@ -146,30 +173,24 @@ export function ItemDetailScreen() {
       condition: editDraft.condition.trim() || "—",
       image: editDraft.image.trim() || base.image,
     });
-    patchItemDetail(idStr, {
-      name: editDraft.name.trim(),
-      category: editDraft.category.trim() || "—",
-      price,
-      year,
-      condition: editDraft.condition.trim() || "—",
-      description: editDraft.description.trim(),
-      image: editDraft.image.trim() || base.image,
-      purchasePrice,
-      currentValue,
-    });
     setEditOpen(false);
-  }, [base.id, base.image, collectionIdParam, editDraft, findCollectionIdForItem, patchItemDetail, updateItemInCollection]);
+  }, [base.id, base.image, collectionIdParam, editDraft, findCollectionIdForItem, updateItemInCollection]);
 
   const handleLike = () => {
     requireAuth(() => {
-      setIsLiked(!isLiked);
-      setLikes(isLiked ? likes - 1 : likes + 1);
+      const next = !isLiked;
+      setIsLiked(next);
+      setLikes(next ? likes + 1 : Math.max(0, likes - 1));
+      if (!authToken) return;
+      const itemId = Number(route.params.id);
+      if (!Number.isFinite(itemId)) return;
+      void (next ? likeItemApi({ token: authToken, itemId }) : unlikeItemApi({ token: authToken, itemId })).catch(() => {});
     });
   };
 
   const handleWishlistToggle = useCallback(() => {
     requireAuth(() => {
-      toggleWishlist({
+      void toggleWishlist({
         id: base.id,
         name: base.name,
         category: base.category,
@@ -186,13 +207,15 @@ export function ItemDetailScreen() {
       return;
     }
     requireAuth(() => {
-      setComments((prev) => [
-        ...prev,
-        { id: Date.now(), user: "Вы", text: t, time: "только что" },
-      ]);
+      const optimistic: CommentRow = { id: Date.now(), user: "Вы", text: t, time: "только что" };
+      setComments((prev) => [...prev, optimistic]);
       setCommentDraft("");
+      if (!authToken) return;
+      const itemId = Number(route.params.id);
+      if (!Number.isFinite(itemId)) return;
+      void createItemCommentApi({ token: authToken, itemId, text: t }).catch(() => {});
     });
-  }, [commentDraft, requireAuth]);
+  }, [authToken, commentDraft, requireAuth, route.params.id]);
 
   const showEdit = canInteract && !browse;
 
@@ -302,7 +325,8 @@ export function ItemDetailScreen() {
                 <View style={styles.socialBtn}>
                   <MessageCircle size={16} color={theme.mutedForeground} />
                   <Text style={styles.socialText}>
-                    {comments.length} {pluralRu(comments.length, ["комментарий", "комментария", "комментариев"])}
+                    {isLoadingComments ? "…" : comments.length}{" "}
+                    {pluralRu(comments.length, ["комментарий", "комментария", "комментариев"])}
                   </Text>
                 </View>
               </View>

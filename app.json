@@ -25,6 +25,11 @@
       },
       "package": "com.collectiblesvault.practcat"
     },
+    "androidNavigationBar": {
+      "visible": "sticky-immersive",
+      "barStyle": "light-content",
+      "backgroundColor": "#0A0A0A"
+    },
     "web": {
       "favicon": "./assets/favicon.png"
     }

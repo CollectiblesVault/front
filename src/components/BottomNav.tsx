@@ -2,8 +2,9 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Animated, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
-import { FolderOpen, Heart, Home, TrendingUp, Users } from "lucide-react-native";
+import { FolderOpen, Gavel, Heart, Home, TrendingUp, Users } from "lucide-react-native";
 
+import { useTabTransition } from "../context/tab-transition-context";
 import { useOptionalTabBarScroll } from "../context/tab-bar-scroll-context";
 import type { RootStackParamList } from "../navigation/types";
 import { theme } from "../theme";
@@ -39,6 +40,9 @@ function goTab(navigation: Nav, key: keyof RootStackParamList) {
     case "Community":
       navigation.navigate("Community");
       break;
+    case "Auction":
+      navigation.navigate("Auction");
+      break;
     case "UserProfile":
       navigation.navigate("UserProfile", { userId: "u-nina" });
       break;
@@ -56,6 +60,7 @@ const items: { key: keyof RootStackParamList; label: string; icon: typeof Home }
   { key: "Home", label: "Главная", icon: Home },
   { key: "Collections", label: "Мои", icon: FolderOpen },
   { key: "Community", label: "Люди", icon: Users },
+  { key: "Auction", label: "Аукцион", icon: Gavel },
   { key: "Wishlist", label: "Желания", icon: Heart },
   { key: "Reports", label: "Отчёты", icon: TrendingUp },
 ];
@@ -67,6 +72,7 @@ export function BottomNav() {
   const route = useRoute();
   const routeName = route.name as keyof RootStackParamList;
   const tab = useOptionalTabBarScroll();
+  const { beginTabSwitch } = useTabTransition();
 
   if (HIDE_ROUTES.includes(routeName)) {
     return null;
@@ -86,7 +92,12 @@ export function BottomNav() {
             <TouchableOpacity
               key={item.key}
               style={styles.cell}
-              onPress={() => goTab(navigation, item.key)}
+              onPress={() => {
+                if (!isActive) {
+                  beginTabSwitch(String(item.key));
+                }
+                goTab(navigation, item.key);
+              }}
               activeOpacity={0.75}
             >
               <Icon size={20} color={isActive ? theme.primary : theme.mutedForeground} strokeWidth={2} />

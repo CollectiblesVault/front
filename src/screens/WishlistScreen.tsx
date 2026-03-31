@@ -97,7 +97,7 @@ export function WishlistScreen() {
                           Alert.alert("Нужен вход", "Удаление из списка желаний доступно после входа.");
                           return;
                         }
-                        removeFromWishlist(item.id);
+                        void removeFromWishlist(item.id);
                       }}
                       style={!canInteract ? { opacity: 0.4 } : undefined}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

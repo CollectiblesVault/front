@@ -1,6 +1,18 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { collectionItems as seedItems, collections as seedCollections, itemDetailById } from "../data/mocks";
+import {
+  createCategoryApi,
+  createCollectionApi,
+  createItemApi,
+  deleteCollectionApi,
+  deleteItemApi,
+  getCategoriesApi,
+  getCollectionsApi,
+  getItemsApi,
+  updateCollectionApi,
+  updateItemApi,
+} from "../api/vaultApi";
+import { useAppSettings } from "./app-settings-context";
 
 export interface CollectionRow {
   id: number;
@@ -14,6 +26,7 @@ export interface CollectionItemRow {
   id: number;
   name: string;
   category: string;
+  categoryId?: number | null;
   price: number;
   year: number;
   condition: string;
@@ -35,118 +48,208 @@ export type ItemDetailOverride = Partial<{
   likes: number;
 }>;
 
-const DEFAULT_NEW_IMAGE =
-  "https://images.unsplash.com/photo-1631692364644-d6558eab0915?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=800";
+const DEFAULT_COLLECTION_IMAGE = (id: number) => `https://picsum.photos/seed/collection-${id}/900/900`;
+const DEFAULT_ITEM_IMAGE = (id: number) => `https://picsum.photos/seed/item-${id}/900/900`;
 
 const EMPTY_ITEMS: CollectionItemRow[] = [];
 
-function mapSeedItem(it: (typeof seedItems)[number]): CollectionItemRow {
-  return {
-    id: it.id,
-    name: it.name,
-    category: it.category,
-    price: it.price,
-    year: it.year,
-    condition: it.condition,
-    image: it.image,
-    isWishlisted: it.isWishlisted,
-  };
+function safeString(v: any, fallback = ""): string {
+  return typeof v === "string" ? v : fallback;
 }
 
-function fallbackDetailFromId(idStr: string) {
-  const d = itemDetailById["1"]!;
-  return {
-    ...d,
-    id: Number(idStr),
-    name: "Новый предмет",
-    category: "Разное",
-    price: 0,
-    year: new Date().getFullYear(),
-    condition: "—",
-    description: "",
-    purchasePrice: 0,
-    currentValue: 0,
-    image: DEFAULT_NEW_IMAGE,
-    likes: 0,
-    comments: [] as { id: number; user: string; text: string; time: string }[],
-  };
+function safeNumber(v: any, fallback = 0): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number.parseFloat(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
 }
+
+function normalizeCollection(raw: any): { id: number; name: string; description?: string | null } | null {
+  const id = safeNumber(raw?.id ?? raw?.collection_id, NaN);
+  if (!Number.isFinite(id)) return null;
+  const name = safeString(raw?.name, "").trim() || `Коллекция ${id}`;
+  const description = raw?.description != null ? safeString(raw.description, "") : undefined;
+  return { id, name, description };
+}
+
+function normalizeItem(raw: any): {
+  id: number;
+  collectionId: number | null;
+  categoryId: number | null;
+  name: string;
+  description: string;
+  price: number;
+  image: string;
+} | null {
+  const id = safeNumber(raw?.id ?? raw?.item_id, NaN);
+  if (!Number.isFinite(id)) return null;
+  const collectionId = Number.isFinite(safeNumber(raw?.collection_id, NaN)) ? safeNumber(raw?.collection_id, NaN) : null;
+  const categoryId = Number.isFinite(safeNumber(raw?.category_id, NaN)) ? safeNumber(raw?.category_id, NaN) : null;
+  const name = safeString(raw?.name, "").trim() || `Предмет ${id}`;
+  const description = safeString(raw?.description, "");
+  const price = safeNumber(raw?.price, 0);
+  const image = safeString(raw?.image_url ?? raw?.image, "").trim() || DEFAULT_ITEM_IMAGE(id);
+  return { id, collectionId, categoryId, name, description, price, image };
+}
+
+type MergedDetail = {
+  id: number;
+  name: string;
+  category: string;
+  price: number;
+  year: number;
+  condition: string;
+  description: string;
+  acquired: string;
+  purchasePrice: number;
+  currentValue: number;
+  image: string;
+  isWishlisted: boolean;
+  likes: number;
+  comments: { id: number; user: string; text: string; time: string }[];
+};
 
 interface CollectionsStoreValue {
   collectionsList: CollectionRow[];
   itemsForCollection: (collectionId: string) => CollectionItemRow[];
   collectionTitle: (collectionId: string | undefined) => string;
   collectionImage: (collectionId: string | undefined) => string;
-  addCollection: (name: string, image?: string) => number | null;
-  updateCollection: (collectionId: string, patch: { name?: string; image?: string }) => void;
+  isLoadingCollections: boolean;
+  collectionsError: string | null;
+  isLoadingItemsForCollection: (collectionId: string) => boolean;
+  refreshCollections: () => Promise<void>;
+  addCollection: (name: string, _image?: string) => Promise<number | null>;
+  updateCollection: (collectionId: string, patch: { name?: string; image?: string }) => Promise<void>;
+  deleteCollection: (collectionId: string) => Promise<void>;
   renameCollection: (collectionId: string, name: string) => void;
   addItemToCollection: (
     collectionId: string,
     row: Omit<CollectionItemRow, "id" | "isWishlisted"> & { description?: string },
-  ) => number;
+  ) => Promise<number>;
   updateItemInCollection: (
     collectionId: string,
     itemId: number,
     patch: Partial<CollectionItemRow>,
-  ) => void;
-  patchItemDetail: (itemIdStr: string, patch: ItemDetailOverride) => void;
-  mergedItemDetail: (itemIdStr: string) => ReturnType<typeof buildMergedDetail>;
+  ) => Promise<void>;
+  deleteItemFromCollection: (collectionId: string, itemId: number) => Promise<void>;
+  mergedItemDetail: (itemIdStr: string) => MergedDetail;
   findCollectionIdForItem: (itemId: number) => string | undefined;
 }
 
 const CollectionsStoreContext = createContext<CollectionsStoreValue | null>(null);
 
-function buildMergedDetail(itemIdStr: string, overrides: Record<string, ItemDetailOverride>) {
-  const seed = itemDetailById[itemIdStr];
-  const o = overrides[itemIdStr] ?? {};
-  const base = seed ?? fallbackDetailFromId(itemIdStr);
-  const merged = { ...base, ...o, id: Number(itemIdStr) };
-  return merged;
-}
-
 export function CollectionsStoreProvider({ children }: { children: ReactNode }) {
-  const [extra, setExtra] = useState<CollectionRow[]>([]);
-  const [nameOverrides, setNameOverrides] = useState<Record<string, string>>({});
-  const [imageOverrides, setImageOverrides] = useState<Record<string, string>>({});
-  const [itemDetailOverrides, setItemDetailOverrides] = useState<Record<string, ItemDetailOverride>>({});
-  const [itemsMap, setItemsMap] = useState<Record<string, CollectionItemRow[]>>(() => {
-    const m: Record<string, CollectionItemRow[]> = {};
-    for (const c of seedCollections) {
-      m[String(c.id)] = seedItems.map(mapSeedItem);
-    }
-    return m;
-  });
+  const { authToken } = useAppSettings();
 
-  const collectionsList = useMemo(() => {
-    const rows: CollectionRow[] = [];
-    for (const c of seedCollections) {
-      const id = String(c.id);
-      const items = itemsMap[id] ?? EMPTY_ITEMS;
-      rows.push({
-        ...c,
-        name: nameOverrides[id] ?? c.name,
-        image: imageOverrides[id] ?? c.image,
+  const [collections, setCollections] = useState<{ id: number; name: string; description?: string | null }[]>([]);
+  const [itemsMap, setItemsMap] = useState<Record<string, CollectionItemRow[]>>({});
+  const [categoriesById, setCategoriesById] = useState<Record<number, { id: number; name: string }>>({});
+
+  const [isLoadingCollections, setIsLoadingCollections] = useState(false);
+  const [collectionsError, setCollectionsError] = useState<string | null>(null);
+  const [itemsLoadingMap, setItemsLoadingMap] = useState<Record<string, boolean>>({});
+
+  const lastAuthRef = useRef<string | null>(null);
+
+  const refreshCollections = useCallback(async () => {
+    if (!authToken) {
+      setCollections([]);
+      setItemsMap({});
+      setCollectionsError(null);
+      setIsLoadingCollections(false);
+      return;
+    }
+    setIsLoadingCollections(true);
+    setCollectionsError(null);
+    try {
+      const [rawCollections, rawItems, rawCategories] = await Promise.all([
+        getCollectionsApi({ token: authToken }),
+        getItemsApi({ token: authToken }),
+        getCategoriesApi({ token: authToken }),
+      ]);
+
+      const nextCollections = (rawCollections ?? [])
+        .map(normalizeCollection)
+        .filter(Boolean) as { id: number; name: string; description?: string | null }[];
+
+      const nextCategoriesById: Record<number, { id: number; name: string }> = {};
+      for (const c of rawCategories ?? []) {
+        const id = safeNumber(c?.id ?? c?.category_id, NaN);
+        if (!Number.isFinite(id)) continue;
+        const name = safeString(c?.name, "").trim() || `Категория ${id}`;
+        nextCategoriesById[id] = { id, name };
+      }
+      setCategoriesById(nextCategoriesById);
+
+      const byCollection: Record<string, CollectionItemRow[]> = {};
+      for (const itRaw of rawItems ?? []) {
+        const it = normalizeItem(itRaw);
+        if (!it) continue;
+        const cid = it.collectionId;
+        if (cid == null) continue;
+        const key = String(cid);
+        const catName =
+          (it.categoryId != null ? nextCategoriesById[it.categoryId]?.name : undefined) ?? "—";
+        const row: CollectionItemRow = {
+          id: it.id,
+          name: it.name,
+          category: catName,
+          categoryId: it.categoryId,
+          price: it.price,
+          year: new Date().getFullYear(),
+          condition: "—",
+          image: it.image,
+          isWishlisted: false,
+        };
+        byCollection[key] = [...(byCollection[key] ?? []), row];
+      }
+      setItemsMap(byCollection);
+      setCollections(nextCollections);
+    } catch (e: any) {
+      const message = e?.message ? String(e.message) : "Не удалось загрузить коллекции.";
+      // Expired/invalid token should not block UI with hard error on collections screen.
+      if (message.includes("401")) {
+        setCollections([]);
+        setItemsMap({});
+        setCollectionsError(null);
+      } else {
+        setCollectionsError(message);
+      }
+    } finally {
+      setIsLoadingCollections(false);
+    }
+  }, [authToken]);
+
+  useEffect(() => {
+    if (lastAuthRef.current !== authToken) {
+      lastAuthRef.current = authToken;
+      refreshCollections();
+    }
+  }, [authToken, refreshCollections]);
+
+  const collectionsList = useMemo<CollectionRow[]>(() => {
+    return collections.map((c) => {
+      const items = itemsMap[String(c.id)] ?? EMPTY_ITEMS;
+      return {
+        id: c.id,
+        name: c.name,
         itemCount: items.length,
         totalValue: items.reduce((s, i) => s + i.price, 0),
-      });
-    }
-    for (const e of extra) {
-      const id = String(e.id);
-      const items = itemsMap[id] ?? EMPTY_ITEMS;
-      rows.push({
-        ...e,
-        name: nameOverrides[id] ?? e.name,
-        image: imageOverrides[id] ?? e.image,
-        itemCount: items.length,
-        totalValue: items.reduce((s, i) => s + i.price, 0),
-      });
-    }
-    return rows;
-  }, [itemsMap, extra, nameOverrides, imageOverrides]);
+        image: DEFAULT_COLLECTION_IMAGE(c.id),
+      };
+    });
+  }, [collections, itemsMap]);
 
   const itemsForCollection = useCallback(
     (collectionId: string) => itemsMap[collectionId] ?? EMPTY_ITEMS,
     [itemsMap],
+  );
+
+  const isLoadingItemsForCollection = useCallback(
+    (collectionId: string) => itemsLoadingMap[collectionId] === true,
+    [itemsLoadingMap],
   );
 
   const collectionTitle = useCallback(
@@ -162,7 +265,7 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
     (collectionId: string | undefined) => {
       const n = Number(collectionId);
       const c = collectionsList.find((x) => x.id === n);
-      return c?.image ?? DEFAULT_NEW_IMAGE;
+      return c?.image ?? DEFAULT_COLLECTION_IMAGE(n || 0);
     },
     [collectionsList],
   );
@@ -180,116 +283,157 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
   );
 
   const addCollection = useCallback(
-    (name: string, image?: string) => {
+    async (name: string) => {
+      if (!authToken) return null;
       const trimmed = name.trim();
-      if (!trimmed) {
-        return null;
-      }
-      const maxId = collectionsList.reduce((m, c) => Math.max(m, c.id), 0);
-      const id = maxId + 1;
-      const img = image?.trim() || DEFAULT_NEW_IMAGE;
-      const row: CollectionRow = {
-        id,
-        name: trimmed,
-        itemCount: 0,
-        totalValue: 0,
-        image: img,
-      };
-      setExtra((prev) => [...prev, row]);
-      setItemsMap((prev) => ({ ...prev, [String(id)]: [] }));
-      return id;
+      if (!trimmed) return null;
+      const res = await createCollectionApi({ token: authToken, name: trimmed });
+      const id = safeNumber(res?.id ?? res?.collection_id, NaN);
+      await refreshCollections();
+      return Number.isFinite(id) ? id : null;
     },
-    [collectionsList],
+    [authToken, refreshCollections],
   );
 
-  const updateCollection = useCallback((collectionId: string, patch: { name?: string; image?: string }) => {
-    if (patch.name != null) {
-      const t = patch.name.trim();
-      if (t) {
-        setNameOverrides((prev) => ({ ...prev, [collectionId]: t }));
-      }
-    }
-    if (patch.image != null) {
-      const u = patch.image.trim();
-      if (u) {
-        setImageOverrides((prev) => ({ ...prev, [collectionId]: u }));
-      }
-    }
-  }, []);
+  const updateCollection = useCallback(
+    async (collectionId: string, patch: { name?: string; image?: string }) => {
+      if (!authToken) return;
+      const id = Number(collectionId);
+      const existing = collections.find((c) => c.id === id);
+      const name = (patch.name ?? existing?.name ?? "").trim();
+      if (!name) return;
+      // Backend schema supports name/description; image is ignored.
+      await updateCollectionApi({ token: authToken, collectionId: id, name });
+      await refreshCollections();
+    },
+    [authToken, collections, refreshCollections],
+  );
+
+  const deleteCollection = useCallback(
+    async (collectionId: string) => {
+      if (!authToken) return;
+      const id = Number(collectionId);
+      if (!Number.isFinite(id)) return;
+      await deleteCollectionApi({ token: authToken, collectionId: id });
+      await refreshCollections();
+    },
+    [authToken, refreshCollections],
+  );
 
   const renameCollection = useCallback(
     (collectionId: string, name: string) => {
-      updateCollection(collectionId, { name });
+      void updateCollection(collectionId, { name });
     },
     [updateCollection],
   );
 
-  const patchItemDetail = useCallback((itemIdStr: string, patch: ItemDetailOverride) => {
-    setItemDetailOverrides((prev) => ({
-      ...prev,
-      [itemIdStr]: { ...prev[itemIdStr], ...patch },
-    }));
-  }, []);
-
   const addItemToCollection = useCallback(
-    (collectionId: string, row: Omit<CollectionItemRow, "id" | "isWishlisted"> & { description?: string }) => {
-      let newId = 0;
-      setItemsMap((prev) => {
-        const list = prev[collectionId] ?? [];
-        const allIds = Object.values(prev)
-          .flat()
-          .map((i) => i.id);
-        newId = Math.max(0, ...allIds) + 1;
-        const item: CollectionItemRow = {
-          id: newId,
-          name: row.name,
-          category: row.category,
-          price: row.price,
-          year: row.year,
-          condition: row.condition,
-          image: row.image,
-          isWishlisted: false,
-        };
-        return { ...prev, [collectionId]: [...list, item] };
+    async (collectionId: string, row: Omit<CollectionItemRow, "id" | "isWishlisted"> & { description?: string }) => {
+      if (!authToken) return 0;
+      const cid = Number(collectionId);
+      if (!Number.isFinite(cid)) return 0;
+
+      const name = row.name.trim();
+      if (!name) return 0;
+
+      // Ensure category exists (by name). If not found, create it.
+      let categoryId: number | null = null;
+      const desiredCat = row.category.trim();
+      if (desiredCat) {
+        const existing = Object.values(categoriesById).find((c) => c.name.toLowerCase() === desiredCat.toLowerCase());
+        if (existing) {
+          categoryId = existing.id;
+        } else {
+          const created = await createCategoryApi({ token: authToken, name: desiredCat });
+          const createdId = safeNumber(created?.id ?? created?.category_id, NaN);
+          categoryId = Number.isFinite(createdId) ? createdId : null;
+          await refreshCollections(); // refresh categories cache
+        }
+      }
+      if (!categoryId) {
+        // Fallback: pick any existing category.
+        const any = Object.values(categoriesById)[0];
+        categoryId = any?.id ?? null;
+      }
+      if (!categoryId) {
+        throw new Error("Нет категорий на сервере. Создайте категорию и повторите.");
+      }
+
+      const created = await createItemApi({
+        token: authToken,
+        collection_id: cid,
+        category_id: categoryId,
+        name,
+        price: row.price,
+        image_url: row.image?.trim() ? row.image.trim() : null,
+        description: row.description?.trim() ? row.description.trim() : null,
       });
-      const idStr = String(newId);
-      setItemDetailOverrides((prev) => ({
-        ...prev,
-        [idStr]: {
-          ...prev[idStr],
-          description: row.description ?? "",
-          purchasePrice: row.price,
-          currentValue: row.price,
-          name: row.name,
-          category: row.category,
-          price: row.price,
-          year: row.year,
-          condition: row.condition,
-          image: row.image,
-        },
-      }));
+      const newId = safeNumber(created?.id ?? created?.item_id, 0);
+      await refreshCollections();
       return newId;
     },
-    [],
+    [authToken, categoriesById, refreshCollections],
   );
 
   const updateItemInCollection = useCallback(
-    (collectionId: string, itemId: number, patch: Partial<CollectionItemRow>) => {
-      setItemsMap((prev) => {
-        const list = prev[collectionId];
-        if (!list) {
-          return prev;
-        }
-        const next = list.map((it) => (it.id === itemId ? { ...it, ...patch } : it));
-        return { ...prev, [collectionId]: next };
+    async (_collectionId: string, itemId: number, patch: Partial<CollectionItemRow>) => {
+      if (!authToken) return;
+      const name = patch.name?.trim();
+      const price = patch.price;
+      if (!name && price === undefined) {
+        return;
+      }
+      const existing = Object.values(itemsMap).flat().find((x) => x.id === itemId);
+      const nextName = (name ?? existing?.name ?? "").trim();
+      const nextPrice = price ?? existing?.price ?? 0;
+      await updateItemApi({
+        token: authToken,
+        item_id: itemId,
+        name: nextName,
+        price: nextPrice,
+        image_url: patch.image?.trim() ? patch.image.trim() : undefined,
+        description: undefined,
       });
+      await refreshCollections();
     },
-    [],
+    [authToken, itemsMap, refreshCollections],
+  );
+
+  const deleteItemFromCollection = useCallback(
+    async (_collectionId: string, itemId: number) => {
+      if (!authToken) return;
+      await deleteItemApi({ token: authToken, itemId });
+      await refreshCollections();
+    },
+    [authToken, refreshCollections],
   );
 
   const mergedItemDetail = useCallback(
-    (itemIdStr: string) => buildMergedDetail(itemIdStr, itemDetailOverrides),
-    [itemDetailOverrides],
+    (itemIdStr: string): MergedDetail => {
+      const id = Number(itemIdStr);
+      const found = Object.values(itemsMap).flat().find((x) => x.id === id);
+      const catName = found?.category ?? "—";
+      const price = found?.price ?? 0;
+      const name = found?.name ?? `Предмет ${id}`;
+      const image = found?.image ?? DEFAULT_ITEM_IMAGE(id);
+      return {
+        id,
+        name,
+        category: catName,
+        price,
+        year: new Date().getFullYear(),
+        condition: "—",
+        description: "",
+        acquired: "—",
+        purchasePrice: price,
+        currentValue: price,
+        image,
+        isWishlisted: false,
+        likes: 0,
+        comments: [],
+      };
+    },
+    [itemsMap],
   );
 
   const value = useMemo(
@@ -298,13 +442,18 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
       itemsForCollection,
       collectionTitle,
       collectionImage,
+      isLoadingCollections,
+      collectionsError,
+      isLoadingItemsForCollection,
+      refreshCollections,
       addCollection,
       updateCollection,
+      deleteCollection,
       renameCollection,
       addItemToCollection,
       updateItemInCollection,
-      patchItemDetail,
       mergedItemDetail,
+      deleteItemFromCollection,
       findCollectionIdForItem,
     }),
     [
@@ -312,13 +461,18 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
       itemsForCollection,
       collectionTitle,
       collectionImage,
+      isLoadingCollections,
+      collectionsError,
+      isLoadingItemsForCollection,
+      refreshCollections,
       addCollection,
       updateCollection,
+      deleteCollection,
       renameCollection,
       addItemToCollection,
       updateItemInCollection,
-      patchItemDetail,
       mergedItemDetail,
+      deleteItemFromCollection,
       findCollectionIdForItem,
     ],
   );

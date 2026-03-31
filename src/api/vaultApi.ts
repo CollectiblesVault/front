@@ -21,10 +21,16 @@ function toQueryString(query: ApiRequestOptions["query"]) {
 
 async function apiRequest<T = any>({ method, path, query, token, body, headers }: ApiRequestOptions) {
   const url = `${BASE_URL}${path}${toQueryString(query)}`;
+  const authHeaderValue =
+    token && token.trim().length > 0
+      ? /^Bearer\s+/i.test(token.trim())
+        ? token.trim()
+        : `Bearer ${token.trim()}`
+      : null;
   const res = await fetch(url, {
     method,
     headers: {
-      ...(token ? { authorization: token } : {}),
+      ...(authHeaderValue ? { authorization: authHeaderValue } : {}),
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
       Accept: "application/json",
       ...headers,
@@ -132,6 +138,21 @@ export async function reportsSummaryCsvApi({
   });
 }
 
+export async function reportsSummaryApi({
+  token,
+  period,
+}: {
+  token?: string | null;
+  period: "week" | "month" | "year";
+}) {
+  return apiRequest<any>({
+    method: "GET",
+    path: "/api/reports/summary",
+    query: { period },
+    token,
+  });
+}
+
 export async function getPublicUsersApi({
   limit,
   offset,
@@ -158,6 +179,81 @@ export async function getPublicCollectionItemsApi({ collectionId }: { collection
   return apiRequest<any[]>({
     method: "GET",
     path: `/api/collections/${collectionId}/items`,
+  });
+}
+
+export async function getCollectionsApi({ token }: { token?: string | null }) {
+  return apiRequest<any[]>({
+    method: "GET",
+    path: "/api/collections",
+    token,
+  });
+}
+
+export async function deleteCollectionApi({ token, collectionId }: { token?: string | null; collectionId: number }) {
+  return apiRequest<{ [k: string]: boolean }>({
+    method: "DELETE",
+    path: `/api/collections/${collectionId}`,
+    token,
+  });
+}
+
+export async function getItemsApi({ token }: { token?: string | null }) {
+  return apiRequest<any[]>({
+    method: "GET",
+    path: "/api/items",
+    token,
+  });
+}
+
+export async function deleteItemApi({ token, itemId }: { token?: string | null; itemId: number }) {
+  return apiRequest<{ [k: string]: boolean }>({
+    method: "DELETE",
+    path: `/api/items/${itemId}`,
+    token,
+  });
+}
+
+export async function getWishlistApi({ token }: { token?: string | null }) {
+  return apiRequest<any[]>({
+    method: "GET",
+    path: "/api/wishlist",
+    token,
+  });
+}
+
+export async function createWishlistApi({
+  token,
+  item_id,
+  item_name,
+}: {
+  token?: string | null;
+  item_id?: number | null;
+  item_name?: string | null;
+}) {
+  return apiRequest<any>({
+    method: "POST",
+    path: "/api/wishlist",
+    token,
+    body: {
+      ...(item_id !== undefined ? { item_id } : {}),
+      ...(item_name !== undefined ? { item_name } : {}),
+    },
+  });
+}
+
+export async function deleteWishlistApi({ token, wishlistId }: { token?: string | null; wishlistId: number }) {
+  return apiRequest<{ [k: string]: boolean }>({
+    method: "DELETE",
+    path: `/api/wishlist/${wishlistId}`,
+    token,
+  });
+}
+
+export async function getPublicUserApi({ userId }: { userId: number }) {
+  return apiRequest<any>({
+    method: "GET",
+    path: `/api/users/${userId}`,
   });
 }
 
@@ -362,6 +458,59 @@ export async function removeItemFromWishlistApi({ token, itemId }: { token?: str
     method: "DELETE",
     path: `/api/items/${itemId}/wishlist`,
     token,
+  });
+}
+
+export async function getLotsApi() {
+  return apiRequest<any[]>({
+    method: "GET",
+    path: "/api/lots",
+  });
+}
+
+export async function createLotApi({
+  token,
+  name,
+  start_price,
+  step,
+  end_time,
+  description,
+}: {
+  token?: string | null;
+  name: string;
+  start_price: number | string;
+  step: number | string;
+  end_time: string;
+  description?: string | null;
+}) {
+  return apiRequest<any>({
+    method: "POST",
+    path: "/api/lot",
+    token,
+    body: {
+      name,
+      start_price,
+      step,
+      end_time,
+      ...(description !== undefined ? { description } : {}),
+    },
+  });
+}
+
+export async function createBidApi({
+  token,
+  lot_id,
+  amount,
+}: {
+  token?: string | null;
+  lot_id: number;
+  amount: number | string;
+}) {
+  return apiRequest<any>({
+    method: "POST",
+    path: "/api/bid",
+    token,
+    body: { lot_id, amount },
   });
 }
 

@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { wishlistSeed } from "../data/mocks";
+import { addItemToWishlistApi, getWishlistApi, removeItemFromWishlistApi } from "../api/vaultApi";
+import { useAppSettings } from "./app-settings-context";
 
 export interface WishlistEntry {
   id: number;
@@ -14,49 +15,77 @@ export interface WishlistEntry {
 
 interface WishlistValue {
   entries: WishlistEntry[];
-  addToWishlist: (entry: Omit<WishlistEntry, "priority"> & { priority?: WishlistEntry["priority"] }) => void;
-  removeFromWishlist: (id: number) => void;
+  isLoading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+  addToWishlist: (entry: Omit<WishlistEntry, "priority"> & { priority?: WishlistEntry["priority"] }) => Promise<void>;
+  removeFromWishlist: (id: number) => Promise<void>;
   isInWishlist: (id: number) => boolean;
-  toggleWishlist: (entry: Omit<WishlistEntry, "priority"> & { priority?: WishlistEntry["priority"] }) => void;
+  toggleWishlist: (entry: Omit<WishlistEntry, "priority"> & { priority?: WishlistEntry["priority"] }) => Promise<void>;
 }
 
 const WishlistContext = createContext<WishlistValue | null>(null);
 
 export function WishlistProvider({ children }: { children: ReactNode }) {
-  const [entries, setEntries] = useState<WishlistEntry[]>(() =>
-    wishlistSeed.map((w) => ({
-      id: w.id,
-      name: w.name,
-      category: w.category,
-      estimatedPrice: w.estimatedPrice,
-      notes: w.notes,
-      image: w.image,
-      priority: w.priority,
-    })),
-  );
+  const { authToken, canInteract } = useAppSettings();
+  const [entries, setEntries] = useState<WishlistEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const lastAuthRef = useRef<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!authToken || !canInteract) {
+      setEntries([]);
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    try {
+      const raw = await getWishlistApi({ token: authToken });
+      const list: WishlistEntry[] = (raw ?? []).map((w: any, idx: number) => {
+        const id = typeof w?.item_id === "number" ? w.item_id : typeof w?.id === "number" ? w.id : idx + 1;
+        return {
+          id,
+          name: typeof w?.item_name === "string" ? w.item_name : typeof w?.name === "string" ? w.name : `Item ${id}`,
+          category: typeof w?.category === "string" ? w.category : "—",
+          estimatedPrice: typeof w?.estimated_price === "number" ? w.estimated_price : 0,
+          notes: typeof w?.notes === "string" ? w.notes : "",
+          image: typeof w?.image_url === "string" ? w.image_url : typeof w?.image === "string" ? w.image : "",
+          priority: (w?.priority === "high" || w?.priority === "low" || w?.priority === "medium") ? w.priority : "medium",
+        };
+      });
+      setEntries(list);
+    } catch (e: any) {
+      setError(e?.message ? String(e.message) : "Не удалось загрузить список желаний.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [authToken, canInteract]);
+
+  useEffect(() => {
+    if (lastAuthRef.current !== authToken) {
+      lastAuthRef.current = authToken;
+      void refresh();
+    }
+  }, [authToken, refresh]);
 
   const isInWishlist = useCallback((id: number) => entries.some((e) => e.id === id), [entries]);
 
   const addToWishlist = useCallback(
-    (entry: Omit<WishlistEntry, "priority"> & { priority?: WishlistEntry["priority"] }) => {
-      setEntries((prev) => {
-        if (prev.some((e) => e.id === entry.id)) {
-          return prev;
-        }
-        const row: WishlistEntry = {
-          ...entry,
-          priority: entry.priority ?? "medium",
-          notes: entry.notes ?? "",
-        };
-        return [...prev, row];
-      });
+    async (entry: Omit<WishlistEntry, "priority"> & { priority?: WishlistEntry["priority"] }) => {
+      if (!authToken) return;
+      await addItemToWishlistApi({ token: authToken, itemId: entry.id });
+      await refresh();
     },
-    [],
+    [authToken, refresh],
   );
 
   const removeFromWishlist = useCallback((id: number) => {
-    setEntries((prev) => prev.filter((e) => e.id !== id));
-  }, []);
+    if (!authToken) return Promise.resolve();
+    return removeItemFromWishlistApi({ token: authToken, itemId: id }).then(() => refresh());
+  }, [authToken, refresh]);
 
   const toggleWishlist = useCallback(
     (entry: Omit<WishlistEntry, "priority"> & { priority?: WishlistEntry["priority"] }) => {
@@ -72,12 +101,15 @@ export function WishlistProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       entries,
+      isLoading,
+      error,
+      refresh,
       addToWishlist,
       removeFromWishlist,
       isInWishlist,
       toggleWishlist,
     }),
-    [entries, addToWishlist, removeFromWishlist, isInWishlist, toggleWishlist],
+    [entries, isLoading, error, refresh, addToWishlist, removeFromWishlist, isInWishlist, toggleWishlist],
   );
 
   return <WishlistContext.Provider value={value}>{children}</WishlistContext.Provider>;

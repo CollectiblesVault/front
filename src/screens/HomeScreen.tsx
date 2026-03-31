@@ -22,7 +22,6 @@ import { CurrencyIcon } from "../components/CurrencyIcon";
 import { TabAwareScrollView } from "../components/TabAwareScrollView";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { useAppSettings } from "../context/app-settings-context";
-import { recentActivity, type RecentActivityTarget } from "../data/mocks";
 import type { RootStackParamList } from "../navigation/types";
 import { theme } from "../theme";
 import { CURRENCY_CODES, getCurrencyLabel } from "../utils/formatMoney";
@@ -67,16 +66,9 @@ export function HomeScreen() {
     { label: "Желания", value: String(wishlistCount) },
   ] as const;
 
-  const navigateFromActivity = useCallback(
-    (target: RecentActivityTarget) => {
-      if (target.name === "ItemDetail") {
-        navigation.navigate("ItemDetail", target.params);
-        return;
-      }
+  const navigateFromActivity = useCallback(() => {
       navigation.navigate("Reports");
-    },
-    [navigation],
-  );
+  }, [navigation]);
 
   const handleLogout = useCallback(() => {
     logout();
@@ -162,28 +154,22 @@ export function HomeScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Недавняя активность</Text>
-          {recentActivity.map((activity, index) => {
-            const Icon = activityIcons[index] ?? FolderOpen;
-            return (
               <TouchableOpacity
-                key={`${activity.type}-${index}`}
                 style={styles.activityCard}
-                onPress={() => navigateFromActivity(activity.target)}
+            onPress={navigateFromActivity}
                 activeOpacity={0.88}
               >
                 <View style={styles.activityIcon}>
-                  <Icon size={20} color={theme.primary} strokeWidth={2} />
+              <FolderOpen size={20} color={theme.primary} strokeWidth={2} />
                 </View>
                 <View style={styles.activityMid}>
-                  <Text style={styles.activityType}>{activity.type}</Text>
+              <Text style={styles.activityType}>Сводка</Text>
                   <Text style={styles.activityItem} numberOfLines={1}>
-                    {activity.item}
+                Откройте отчёты, чтобы увидеть активность по периодам
                   </Text>
                 </View>
-                <Text style={styles.activityTime}>{activity.time}</Text>
+            <Text style={styles.activityTime}>—</Text>
               </TouchableOpacity>
-            );
-          })}
         </View>
       </TabAwareScrollView>
 

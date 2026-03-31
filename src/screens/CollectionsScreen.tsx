@@ -19,6 +19,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomNav } from "../components/BottomNav";
+import { Skeleton } from "../components/Skeleton";
 import { ImageWithFallback } from "../components/ImageWithFallback";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { TabAwareScrollView } from "../components/TabAwareScrollView";
@@ -37,7 +38,7 @@ export function CollectionsScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { formatMoney, canInteract } = useAppSettings();
-  const { collectionsList, addCollection } = useCollectionsStore();
+  const { collectionsList, addCollection, isLoadingCollections } = useCollectionsStore();
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [isOffline] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -46,12 +47,12 @@ export function CollectionsScreen() {
 
   const totalItems = collectionsList.reduce((s, c) => s + c.itemCount, 0);
 
-  const submitNewCollection = () => {
+  const submitNewCollection = async () => {
     if (!canInteract) {
       Alert.alert("Нужен вход", "Создание коллекции доступно после входа в аккаунт.");
       return;
     }
-    const id = addCollection(newName, newPhoto);
+    const id = await addCollection(newName, newPhoto);
     if (id == null) {
       Alert.alert("Ошибка", "Введите название коллекции.");
       return;
@@ -144,7 +145,35 @@ export function CollectionsScreen() {
         contentContainerStyle={{ paddingHorizontal: pad, paddingTop: 16, paddingBottom: 96 }}
         showsVerticalScrollIndicator={false}
       >
-        {viewMode === "grid" ? (
+        {isLoadingCollections ? (
+          viewMode === "grid" ? (
+            <View style={styles.grid}>
+              {[0, 1, 2, 3].map((i) => (
+                <View key={i} style={[styles.gridCard, { width: colW }]}>
+                  <Skeleton style={{ width: "100%", aspectRatio: 1, borderRadius: 0 }} radius={0} />
+                  <View style={styles.gridMeta}>
+                    <Skeleton style={{ height: 14, width: "75%", marginBottom: 10 }} />
+                    <Skeleton style={{ height: 10, width: "55%", marginBottom: 10 }} />
+                    <Skeleton style={{ height: 12, width: "40%" }} />
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View style={{ gap: 12 }}>
+              {[0, 1, 2, 3].map((i) => (
+                <View key={i} style={styles.listCard}>
+                  <Skeleton style={{ width: 80, height: 80, borderRadius: 10 }} />
+                  <View style={{ flex: 1, minWidth: 0, justifyContent: "center", gap: 10 }}>
+                    <Skeleton style={{ height: 14, width: "70%" }} />
+                    <Skeleton style={{ height: 10, width: "55%" }} />
+                    <Skeleton style={{ height: 12, width: "40%" }} />
+                  </View>
+                </View>
+              ))}
+            </View>
+          )
+        ) : viewMode === "grid" ? (
           <View style={styles.grid}>
             {collectionsList.map((c) => (
               <TouchableOpacity

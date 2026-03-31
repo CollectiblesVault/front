@@ -8,6 +8,7 @@ export type RootStackParamList = {
   Wishlist: undefined;
   Reports: undefined;
   Community: undefined;
+  Auction: undefined;
   UserProfile: { userId: string };
   OfflineDemo: undefined;
 };

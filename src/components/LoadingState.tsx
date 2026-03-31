@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { ActivityIndicator, Animated, Easing, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Animated, Easing, Platform, StyleSheet, Text, View } from "react-native";
 
 import { theme } from "../theme";
 
@@ -15,13 +15,13 @@ export function LoadingState() {
             toValue: 1,
             duration: 650,
             easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== "web",
           }),
           Animated.timing(fade, {
             toValue: 1,
             duration: 650,
             easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== "web",
           }),
         ]),
         Animated.parallel([
@@ -29,13 +29,13 @@ export function LoadingState() {
             toValue: 0.4,
             duration: 650,
             easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== "web",
           }),
           Animated.timing(fade, {
             toValue: 0.3,
             duration: 650,
             easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== "web",
           }),
         ]),
       ]),

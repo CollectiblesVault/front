@@ -1,17 +1,19 @@
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, FolderOpen, LayoutGrid, MessageCircle, ThumbsUp, TrendingUp } from "lucide-react-native";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { ErrorState } from "../components/ErrorState";
+import { Skeleton } from "../components/Skeleton";
 import { ImageWithFallback } from "../components/ImageWithFallback";
 import { TabAwareScrollView } from "../components/TabAwareScrollView";
 import { useAppSettings } from "../context/app-settings-context";
 import { useCollectionsStore } from "../context/collections-store-context";
 // actions (лайк/комментарий/желания) доступны в `ItemDetailScreen`
-import { collections as seedCollections, communityUsers } from "../data/mocks";
+import { getPublicUserApi, getUserCollectionsApi } from "../api/vaultApi";
 import type { RootStackParamList } from "../navigation/types";
 import { theme } from "../theme";
 
@@ -22,21 +24,36 @@ export function UserProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const route = useRoute<R>();
-  const { formatMoney } = useAppSettings();
+  const { formatMoney, authToken } = useAppSettings();
+  const { mergedItemDetail } = useCollectionsStore();
 
-  const user = communityUsers.find((u) => u.id === route.params.userId);
-  const { itemsForCollection, mergedItemDetail } = useCollectionsStore();
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<any | null>(null);
+  const [collections, setCollections] = useState<any[]>([]);
 
-  if (!user) {
-    return (
-      <View style={[styles.root, { paddingTop: insets.top }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <ChevronLeft size={26} color={theme.foreground} />
-        </TouchableOpacity>
-        <Text style={styles.err}>Профиль не найден</Text>
-      </View>
-    );
-  }
+  const load = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const userIdNum = Number(route.params.userId);
+      const [u, cols] = await Promise.all([
+        getPublicUserApi({ userId: userIdNum }),
+        getUserCollectionsApi({ userId: userIdNum, token: authToken }),
+      ]);
+      setUser(u ?? null);
+      setCollections(cols ?? []);
+    } catch (e: any) {
+      setError(e?.message ? String(e.message) : "Не удалось загрузить профиль.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.params.userId]);
 
   return (
     <View style={styles.root}>
@@ -46,30 +63,44 @@ export function UserProfileScreen() {
         </TouchableOpacity>
       </View>
 
+      {error ? (
+        <ErrorState message={error} onRetry={load} />
+      ) : (
       <TabAwareScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         <View style={styles.head}>
-          <ImageWithFallback uri={user.avatar} style={styles.avatarLarge} borderRadius={999} />
-          <Text style={styles.displayName}>{user.displayName}</Text>
-          <Text style={styles.handle}>{user.handle}</Text>
-          <Text style={styles.bio}>{user.bio}</Text>
+            {isLoading ? (
+              <>
+                <Skeleton style={{ width: 112, height: 112, borderRadius: 56, marginBottom: 12 }} radius={56} />
+                <Skeleton style={{ height: 18, width: 180 }} />
+                <Skeleton style={{ height: 12, width: 120, marginTop: 10 }} />
+                <Skeleton style={{ height: 12, width: 240, marginTop: 12 }} />
+              </>
+            ) : (
+              <>
+                <ImageWithFallback uri={String(user?.avatar_url ?? user?.avatar ?? "")} style={styles.avatarLarge} borderRadius={999} />
+                <Text style={styles.displayName}>{String(user?.display_name ?? user?.displayName ?? "Пользователь")}</Text>
+                <Text style={styles.handle}>{String(user?.handle ?? "")}</Text>
+                <Text style={styles.bio}>{String(user?.bio ?? "")}</Text>
+              </>
+            )}
         </View>
 
         <Text style={styles.sectionLabel}>Статистика</Text>
         <View style={styles.statsGrid}>
           <View style={styles.statCard}>
             <FolderOpen size={18} color={theme.primary} />
-            <Text style={styles.statVal}>{user.collectionsCount}</Text>
+              <Text style={styles.statVal}>{String(user?.collections_count ?? user?.collectionsCount ?? 0)}</Text>
             <Text style={styles.statLab}>коллекций</Text>
           </View>
           <View style={styles.statCard}>
             <LayoutGrid size={18} color={theme.primary} />
-            <Text style={styles.statVal}>{user.itemsCount}</Text>
+              <Text style={styles.statVal}>{String(user?.items_count ?? user?.itemsCount ?? 0)}</Text>
             <Text style={styles.statLab}>предметов</Text>
           </View>
           <View style={styles.statCard}>
             <TrendingUp size={18} color={theme.primary} />
             <Text style={styles.statVal} numberOfLines={1}>
-              {formatMoney(user.totalValueUsd)}
+                {formatMoney(Number(user?.total_value_usd ?? user?.totalValueUsd ?? 0) || 0)}
             </Text>
             <Text style={styles.statLab}>оценка</Text>
           </View>
@@ -77,77 +108,60 @@ export function UserProfileScreen() {
 
         <Text style={styles.sectionLabel}>Коллекции</Text>
         <View style={styles.userCollections}>
-          {seedCollections.map((c) => {
-            const list = itemsForCollection(String(c.id));
-            const total = list.reduce((s, i) => s + i.price, 0);
-            return (
-              <View key={c.id} style={styles.collectionCard}>
+            {isLoading ? (
+              <>
+                {[0, 1].map((i) => (
+                  <View key={i} style={styles.collectionCard}>
                 <View style={styles.collectionTop}>
-                  <View style={styles.collectionThumb}>
-                    <ImageWithFallback uri={c.image} style={styles.collectionThumbImg} borderRadius={10} />
+                      <Skeleton style={{ width: 84, height: 84, borderRadius: 10 }} radius={10} />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Skeleton style={{ height: 14, width: "70%" }} />
+                        <Skeleton style={{ height: 10, width: "55%", marginTop: 10 }} />
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </>
+            ) : collections.length === 0 ? (
+              <Text style={styles.note}>Публичных коллекций пока нет.</Text>
+            ) : (
+              collections.map((c: any) => {
+                const id = Number(c?.id ?? c?.collection_id);
+                const name = String(c?.name ?? `Коллекция ${id}`);
+                const img = String(c?.image_url ?? c?.image ?? "");
+                const total = Number(c?.total_value_usd ?? c?.totalValueUsd ?? 0) || 0;
+                const itemsCount = Number(c?.items_count ?? c?.itemsCount ?? 0) || 0;
+                // Without an endpoint for user's public collection items here, we don't render item list previews.
+                return (
+                  <View key={String(id)} style={styles.collectionCard}>
+                    <View style={styles.collectionTop}>
+                      <View style={styles.collectionThumb}>
+                        <ImageWithFallback uri={img} style={styles.collectionThumbImg} borderRadius={10} />
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={styles.collectionName} numberOfLines={1}>
-                      {c.name}
+                          {name}
                     </Text>
                     <Text style={styles.collectionSub}>
-                      {list.length} предм. • {formatMoney(total)}
+                          {itemsCount} предм. • {formatMoney(total)}
                     </Text>
                   </View>
                 </View>
 
-                <View style={styles.itemsWrap}>
-                  {list.map((it) => {
-                    const detail = mergedItemDetail(String(it.id));
-                    const desc = (detail.description ?? "").trim();
-                    const preview = desc.length > 20 ? `${desc.slice(0, 20)}…` : desc || "—";
-                    return (
-                      <TouchableOpacity
-                        key={it.id}
-                        activeOpacity={0.92}
-                        onPress={() =>
-                          navigation.navigate("ItemDetail", {
-                            id: String(it.id),
-                            browse: true,
-                            collectionId: String(c.id),
-                          })
-                        }
-                      >
-                        <View style={styles.itemCard}>
-                          <ImageWithFallback uri={it.image} style={styles.itemImg} borderRadius={10} />
-                          <View style={styles.itemBody}>
-                            <Text style={styles.itemDesc} numberOfLines={2}>
-                              {preview}
+                    <Text style={styles.note}>
+                      Детали предметов этой коллекции доступны при наличии API для публичных предметов пользователя.
                             </Text>
-                            <Text style={styles.itemName} numberOfLines={1}>
-                              {it.name}
-                            </Text>
-                            <Text style={styles.itemPrice}>{formatMoney(it.price)}</Text>
-                            <View style={styles.itemMetaRow}>
-                              <View style={styles.metaChip}>
-                                <ThumbsUp size={14} color={theme.primary} fill="transparent" />
-                                <Text style={styles.metaChipText}>{detail.likes}</Text>
-                              </View>
-                              <View style={styles.metaChip}>
-                                <MessageCircle size={14} color={theme.mutedForeground} />
-                                <Text style={styles.metaChipText}>{detail.comments.length}</Text>
-                              </View>
-                            </View>
-                          </View>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
               </View>
             );
-          })}
+              })
+            )}
         </View>
 
         <Text style={styles.note}>
           Это публичная сводка. Собственные коллекции доступны на вкладке «Коллекции».
         </Text>
       </TabAwareScrollView>
+      )}
     </View>
   );
 }

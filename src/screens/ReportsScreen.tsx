@@ -1,7 +1,9 @@
+import { useFocusEffect } from "@react-navigation/native";
 import { Calendar, Filter, TrendingDown, TrendingUp } from "lucide-react-native";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
   Modal,
   Platform,
   Pressable,
@@ -20,7 +22,7 @@ import { DonutChart } from "../components/DonutChart";
 import { useAppSettings } from "../context/app-settings-context";
 import { useCollectionsStore } from "../context/collections-store-context";
 import { useWishlist } from "../context/wishlist-context";
-import { reportsSummaryCsvApi } from "../api/vaultApi";
+import { reportsSummaryApi, reportsSummaryCsvApi } from "../api/vaultApi";
 import { theme } from "../theme";
 
 type TimeRange = "week" | "month" | "year";
@@ -39,6 +41,25 @@ const defaultSections: ReportSections = {
   topPerformers: true,
 };
 
+function useEnterAnim(delayMs: number) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(10)).current;
+  const scale = useRef(new Animated.Value(0.985)).current;
+
+  const play = useCallback(() => {
+    opacity.setValue(0);
+    translateY.setValue(10);
+    scale.setValue(0.985);
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 240, delay: delayMs, useNativeDriver: Platform.OS !== "web" }),
+      Animated.timing(translateY, { toValue: 0, duration: 260, delay: delayMs, useNativeDriver: Platform.OS !== "web" }),
+      Animated.timing(scale, { toValue: 1, duration: 280, delay: delayMs, useNativeDriver: Platform.OS !== "web" }),
+    ]).start();
+  }, [delayMs, opacity, scale, translateY]);
+
+  return { opacity, translateY, scale, play };
+}
+
 export function ReportsScreen() {
   const insets = useSafeAreaInsets();
   const { formatMoney, userProfile, authToken } = useAppSettings();
@@ -46,6 +67,14 @@ export function ReportsScreen() {
   const [timeRange, setTimeRange] = useState<TimeRange>("month");
   const [filterOpen, setFilterOpen] = useState(false);
   const [sections, setSections] = useState<ReportSections>(defaultSections);
+
+  const portfolioAnim = useEnterAnim(40);
+  const growthAnim = useEnterAnim(80);
+  const categoriesAnim = useEnterAnim(120);
+  const topAnim = useEnterAnim(160);
+
+  const donutSpin = useRef(new Animated.Value(0)).current;
+  const barsProgress = useRef(new Animated.Value(0)).current;
 
   const { collectionsList } = useCollectionsStore();
   const { entries: wishlistEntries } = useWishlist();
@@ -215,14 +244,19 @@ export function ReportsScreen() {
 
   const handleExport = useCallback(async () => {
     try {
-      const csv =
-        authToken != null
-          ? await Promise.all([
-              reportsSummaryCsvApi({ token: authToken, period: "week" }),
-              reportsSummaryCsvApi({ token: authToken, period: "month" }),
-              reportsSummaryCsvApi({ token: authToken, period: "year" }),
-            ]).then((parts) => parts.join("\n"))
-          : buildExportCsv();
+      let csv = buildExportCsv();
+      if (authToken != null) {
+        try {
+          csv = await Promise.all([
+            reportsSummaryCsvApi({ token: authToken, period: "week" }),
+            reportsSummaryCsvApi({ token: authToken, period: "month" }),
+            reportsSummaryCsvApi({ token: authToken, period: "year" }),
+          ]).then((parts) => parts.join("\n"));
+        } catch {
+          // If API export fails (e.g. 401/500), keep local CSV fallback.
+          csv = buildExportCsv();
+        }
+      }
 
       // Web: создаём файл через Blob и запускаем скачивание.
       if (Platform.OS === "web") {
@@ -271,6 +305,52 @@ export function ReportsScreen() {
     setSections(defaultSections);
   }, []);
 
+  const refreshStatsFromApi = useCallback(async () => {
+    try {
+      // Required by product behavior: refresh stats from backend every time reports screen is opened.
+      await reportsSummaryApi({ token: authToken, period: timeRange });
+    } catch {
+      // Keep screen functional with local computed fallback if backend is unavailable.
+    }
+  }, [authToken, timeRange]);
+
+  const playAnims = useCallback(() => {
+    portfolioAnim.play();
+    growthAnim.play();
+    categoriesAnim.play();
+    topAnim.play();
+
+    donutSpin.setValue(0);
+    Animated.timing(donutSpin, {
+      toValue: 1,
+      duration: 900,
+      useNativeDriver: true,
+    }).start();
+
+    barsProgress.setValue(0);
+    Animated.timing(barsProgress, {
+      toValue: 1,
+      duration: 650,
+      useNativeDriver: true,
+    }).start();
+  }, [barsProgress, categoriesAnim, donutSpin, growthAnim, portfolioAnim, topAnim]);
+
+  useEffect(() => {
+    playAnims();
+  }, [playAnims, timeRange]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshStatsFromApi();
+      return undefined;
+    }, [refreshStatsFromApi]),
+  );
+
+  const donutRotation = donutSpin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["-22deg", "0deg"],
+  });
+
   return (
     <View style={styles.root}>
       <OfflineBanner isOffline={isOffline} />
@@ -301,7 +381,18 @@ export function ReportsScreen() {
         showsVerticalScrollIndicator={false}
       >
         {sections.portfolioCard ? (
-          <View style={styles.card}>
+          <Animated.View
+            style={[
+              styles.card,
+              {
+                opacity: portfolioAnim.opacity,
+                transform: [
+                  { translateY: portfolioAnim.translateY },
+                  { scale: portfolioAnim.scale },
+                ],
+              },
+            ]}
+          >
             <Text style={styles.cardKicker}>Общая стоимость по вашим коллекциям</Text>
             <Text style={styles.bigValue}>{formatMoney(totalValue)}</Text>
             <View style={styles.trendRow}>
@@ -309,32 +400,50 @@ export function ReportsScreen() {
                 {totalCollections} коллекций • {totalItems} предметов • {wishlistCount} желаний
               </Text>
             </View>
-          </View>
+          </Animated.View>
         ) : null}
 
         {sections.growthChart ? (
-          <View style={styles.card}>
+          <Animated.View
+            style={[
+              styles.card,
+              {
+                opacity: growthAnim.opacity,
+                transform: [{ translateY: growthAnim.translateY }, { scale: growthAnim.scale }],
+              },
+            ]}
+          >
             <Text style={styles.cardTitle}>Изменения за период</Text>
             <View style={styles.chartArea}>
               {changeSeries.map((d) => {
                 const h = Math.round((d.itemsDelta / maxBar) * 160);
                 return (
                   <View key={d.label} style={styles.barCol}>
-                    <View style={[styles.bar, { height: h }]} />
+                    <Animated.View style={[styles.bar, { height: h, transform: [{ scaleY: barsProgress }] }]} />
                     <Text style={styles.barLabel}>{d.label}</Text>
                   </View>
                 );
               })}
             </View>
-          </View>
+          </Animated.View>
         ) : null}
 
         {sections.categories ? (
-          <View style={styles.card}>
+          <Animated.View
+            style={[
+              styles.card,
+              {
+                opacity: categoriesAnim.opacity,
+                transform: [{ translateY: categoriesAnim.translateY }, { scale: categoriesAnim.scale }],
+              },
+            ]}
+          >
             <Text style={styles.cardTitle}>Распределение активности</Text>
             <View style={styles.pieRow}>
               <View style={styles.pieWrap}>
-                <DonutChart data={donutData} size={140} />
+                <Animated.View style={{ transform: [{ rotate: donutRotation }] }}>
+                  <DonutChart data={donutData} size={140} />
+                </Animated.View>
               </View>
               <View style={styles.legend}>
                 {donutLegend.map((s) => (
@@ -350,11 +459,19 @@ export function ReportsScreen() {
                 ))}
               </View>
             </View>
-          </View>
+          </Animated.View>
         ) : null}
 
         {sections.topPerformers ? (
-          <View style={styles.card}>
+          <Animated.View
+            style={[
+              styles.card,
+              {
+                opacity: topAnim.opacity,
+                transform: [{ translateY: topAnim.translateY }, { scale: topAnim.scale }],
+              },
+            ]}
+          >
             <Text style={styles.cardTitle}>Итоги по действиям</Text>
             <View style={{ gap: 10 }}>
               <Text style={styles.vs}>
@@ -370,7 +487,7 @@ export function ReportsScreen() {
                 {changeSeries.reduce((s, r) => s + r.wishlistDelta, 0)}
               </Text>
             </View>
-          </View>
+          </Animated.View>
         ) : null}
 
         <TouchableOpacity
@@ -506,6 +623,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 8,
     borderTopRightRadius: 8,
     minHeight: 8,
+    transformOrigin: "bottom" as any,
   },
   barLabel: { marginTop: 8, fontSize: 11, color: theme.mutedForeground },
   table: { flexDirection: "column", gap: 10 },

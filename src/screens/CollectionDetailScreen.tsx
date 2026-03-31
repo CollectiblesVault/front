@@ -212,7 +212,7 @@ export function CollectionDetailScreen() {
   const onBookmarkItem = useCallback(
     (item: (typeof collectionItems)[number]) => {
       requireAuth(() => {
-        toggleWishlist({
+        void toggleWishlist({
           id: item.id,
           name: item.name,
           category: item.category,
