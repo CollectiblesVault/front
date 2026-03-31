@@ -245,14 +245,6 @@ export function ItemDetailScreen() {
             </View>
           ) : null}
 
-          {browse ? (
-            <View style={styles.browseHint}>
-              <Text style={styles.browseHintText}>
-                Чужой лот: лайк — оценка публикации; закладка — в список желаний (не путать).
-              </Text>
-            </View>
-          ) : null}
-
           {base ? (
             <View style={styles.hero}>
               <ImageWithFallback uri={base.imageUrl} style={styles.heroImg} />
@@ -513,16 +505,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(212,175,55,0.08)",
   },
   guestBannerText: { fontSize: 12, color: theme.mutedForeground, lineHeight: 16 },
-  browseHint: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-    padding: 10,
-    borderRadius: theme.radiusLg,
-    backgroundColor: theme.card,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.border,
-  },
-  browseHintText: { fontSize: 12, color: theme.mutedForeground, lineHeight: 16 },
   hero: { width: "100%", aspectRatio: 1, backgroundColor: theme.card },
   heroImg: { width: "100%", height: "100%" },
   body: { paddingHorizontal: 16, paddingTop: 20, gap: 20 },
