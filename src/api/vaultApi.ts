@@ -54,6 +54,45 @@ async function apiRequest<T = any>({ method, path, query, token, body, headers }
   return (await res.json()) as T;
 }
 
+async function multipartPostJson({
+  path,
+  token,
+  fileUri,
+  fileName,
+  mimeType,
+  fieldName = "file",
+}: {
+  path: string;
+  token?: string | null;
+  fileUri: string;
+  fileName: string;
+  mimeType: string;
+  fieldName?: string;
+}) {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (token && token.trim().length > 0) {
+    const t = token.trim();
+    headers.authorization = /^Bearer\s+/i.test(t) ? t : `Bearer ${t}`;
+  }
+  const formData = new FormData();
+  formData.append(fieldName, {
+    uri: fileUri,
+    name: fileName,
+    type: mimeType,
+  } as any);
+
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API error ${res.status}: ${text || res.statusText}`);
+  }
+  return (await res.json()) as any;
+}
+
 function extractToken(payload: any): string | null {
   if (!payload || typeof payload !== "object") return null;
 
@@ -135,27 +174,93 @@ export async function uploadMyAvatarApi({
   fileName?: string;
   mimeType?: string;
 }) {
-  const authHeaderValue = /^Bearer\s+/i.test(token.trim()) ? token.trim() : `Bearer ${token.trim()}`;
-  const formData = new FormData();
-  formData.append("file", {
-    uri: fileUri,
-    name: fileName,
-    type: mimeType,
-  } as any);
-
-  const res = await fetch(`${BASE_URL}/api/auth/me/avatar`, {
-    method: "POST",
-    headers: {
-      authorization: authHeaderValue,
-      Accept: "application/json",
-    },
-    body: formData,
+  return multipartPostJson({
+    path: "/api/auth/me/avatar",
+    token,
+    fileUri,
+    fileName,
+    mimeType,
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`API error ${res.status}: ${text || res.statusText}`);
+}
+
+/** Распознаёт URL картинки из типичных ответов `POST /api/upload` и аналогов. */
+export function extractUploadedImageUrl(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const u =
+    r.url ??
+    r.image_url ??
+    r.file_url ??
+    r.public_url ??
+    (typeof r.data === "object" && r.data && typeof (r.data as Record<string, unknown>).url === "string"
+      ? (r.data as Record<string, unknown>).url
+      : undefined);
+  return typeof u === "string" && u.trim().length > 0 ? u.trim() : null;
+}
+
+/**
+ * Загрузка фото на сервер (multipart), ответ — JSON с URL (см. `extractUploadedImageUrl`).
+ * Бэкенд: ожидается `POST /api/upload` с полем `file` (как у аватара).
+ */
+export async function uploadImageFileApi({
+  token,
+  fileUri,
+  fileName = "photo.jpg",
+  mimeType = "image/jpeg",
+  uploadPath = "/api/upload",
+}: {
+  token?: string | null;
+  fileUri: string;
+  fileName?: string;
+  mimeType?: string;
+  /** По умолчанию `/api/upload`; при другом контракте бэка передайте путь. */
+  uploadPath?: string;
+}) {
+  return multipartPostJson({
+    path: uploadPath,
+    token,
+    fileUri,
+    fileName,
+    mimeType,
+  });
+}
+
+export type ItemLikeStatus = {
+  likedByMe: boolean;
+  likesCount: number;
+};
+
+/** Нормализация тела ответа GET `/api/items/{id}/like` и похожих схем. */
+export function parseItemLikeStatus(raw: unknown): ItemLikeStatus {
+  if (!raw || typeof raw !== "object") {
+    return { likedByMe: false, likesCount: 0 };
   }
-  return (await res.json()) as any;
+  const r = raw as Record<string, unknown>;
+  const likedByMe = Boolean(
+    r.liked_by_me ?? r.likedByMe ?? r.is_liked ?? r.liked ?? r.isLiked,
+  );
+  const n = Number(r.likes_count ?? r.likesCount ?? r.count ?? r.like_count ?? r.total ?? 0);
+  const likesCount = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+  return { likedByMe, likesCount };
+}
+
+/**
+ * Проверка: лайкнул ли текущий пользователь предмет и сколько всего лайков.
+ * Бэкенд: `GET /api/items/{item_id}/like` (см. MISSING_API.md).
+ */
+export async function getItemLikeStatusApi({
+  token,
+  itemId,
+}: {
+  token?: string | null;
+  itemId: number;
+}): Promise<ItemLikeStatus> {
+  const raw = await apiRequest<any>({
+    method: "GET",
+    path: `/api/items/${itemId}/like`,
+    token,
+  });
+  return parseItemLikeStatus(raw);
 }
 
 export async function reportsSummaryCsvApi({
