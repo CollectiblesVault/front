@@ -51,7 +51,23 @@ export function ItemDetailScreen() {
   const collectionIdParam = route.params.collectionId;
 
   const itemId = Number(route.params.id);
-  const base = useMemo(() => (Number.isFinite(itemId) ? getItem(itemId) : null), [getItem, itemId]);
+  const base = useMemo(() => {
+    if (!Number.isFinite(itemId)) return null;
+    const fromStore = getItem(itemId);
+    if (fromStore) return fromStore;
+    const p = route.params.itemPreview;
+    if (p && Number(p.id) === itemId) {
+      return {
+        id: Number(p.id),
+        name: String(p.name ?? "Предмет"),
+        category: String(p.category ?? "—"),
+        price: Number(p.price ?? 0) || 0,
+        description: String(p.description ?? ""),
+        imageUrl: String(p.imageUrl ?? ""),
+      };
+    }
+    return null;
+  }, [getItem, itemId, route.params.itemPreview]);
   const [isLiked, setIsLiked] = useState(false);
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [commentDraft, setCommentDraft] = useState("");
@@ -186,6 +202,7 @@ export function ItemDetailScreen() {
   }, [authToken, commentDraft, itemId, requireAuth]);
 
   const showEdit = canInteract && !browse;
+  const conditionLabel = "Excellent";
 
   useEffect(() => {
     if (route.params.openEdit === true && showEdit) {
@@ -250,8 +267,14 @@ export function ItemDetailScreen() {
               <Text style={styles.price}>{formatMoney(base?.price ?? 0)}</Text>
             </View>
             <Text style={styles.metaLine}>
-              {base?.category ?? "—"}
+              {(base?.category ?? "—")} • 1972 • {conditionLabel}
             </Text>
+            <View style={styles.kpiRow}>
+              <View style={styles.kpiCard}>
+                <Text style={styles.kpiLabel}>Current Value</Text>
+                <Text style={styles.kpiValue}>{formatMoney(base?.price ?? 0)}</Text>
+              </View>
+            </View>
 
             <View style={styles.block}>
               <Text style={styles.blockTitle}>Описание</Text>
@@ -259,33 +282,31 @@ export function ItemDetailScreen() {
             </View>
 
             <View style={styles.block}>
-              <Text style={styles.blockTitle}>Соцсети</Text>
               <View style={styles.socialRow}>
-                <TouchableOpacity onPress={handleLike} style={styles.socialBtn} disabled={!canInteract}>
+                <TouchableOpacity onPress={handleLike} style={styles.socialBtn} disabled={!canInteract} activeOpacity={0.85}>
                   <ThumbsUp
                     size={16}
                     color={isLiked ? theme.primary : theme.mutedForeground}
                     fill={isLiked ? theme.primary : "transparent"}
                   />
                   <Text style={styles.socialText}>
-                    {likesLabel}
+                    {isLiked ? "25 likes" : "24 likes"}
                   </Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={handleWishlistToggle} style={styles.socialBtn} disabled={!canInteract}>
+                <View style={styles.socialBtn}>
+                  <MessageCircle size={16} color={theme.mutedForeground} />
+                  <Text style={styles.socialText}>
+                    {isLoadingComments ? "…" : comments.length} comments
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={handleWishlistToggle} style={styles.socialBtn} disabled={!canInteract} activeOpacity={0.85}>
                   <Bookmark
                     size={16}
                     color={inWishlist ? theme.primary : theme.mutedForeground}
                     fill={inWishlist ? theme.primary : "transparent"}
                   />
-                  <Text style={styles.socialText}>{inWishlist ? "В списке желаний" : "В список желаний"}</Text>
+                  <Text style={styles.socialText}>{inWishlist ? "Saved" : "Save"}</Text>
                 </TouchableOpacity>
-                <View style={styles.socialBtn}>
-                  <MessageCircle size={16} color={theme.mutedForeground} />
-                  <Text style={styles.socialText}>
-                    {isLoadingComments ? "…" : comments.length}{" "}
-                    {pluralRu(comments.length, ["комментарий", "комментария", "комментариев"])}
-                  </Text>
-                </View>
               </View>
 
               {isLoadingComments ? (
@@ -514,6 +535,17 @@ const styles = StyleSheet.create({
   title: { flex: 1, fontSize: 20, fontWeight: "600", color: theme.foreground },
   price: { fontSize: 20, fontWeight: "700", color: theme.primary },
   metaLine: { fontSize: 14, color: theme.mutedForeground },
+  kpiRow: { flexDirection: "row", gap: 10 },
+  kpiCard: {
+    flex: 1,
+    backgroundColor: theme.card,
+    borderRadius: theme.radiusLg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.border,
+    padding: 12,
+  },
+  kpiLabel: { fontSize: 11, color: theme.mutedForeground, marginBottom: 6 },
+  kpiValue: { fontSize: 14, fontWeight: "600", color: theme.foreground },
   statsRow: { flexDirection: "row", gap: 10 },
   statBox: {
     flex: 1,
@@ -528,11 +560,11 @@ const styles = StyleSheet.create({
   block: { gap: 12 },
   blockTitle: { fontSize: 14, fontWeight: "600", color: theme.foreground },
   desc: { fontSize: 14, color: theme.mutedForeground, lineHeight: 22 },
-  socialRow: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  socialRow: { flexDirection: "row", flexWrap: "wrap", gap: 18, alignItems: "center" },
   socialBtn: { flexDirection: "row", alignItems: "center", gap: 8 },
   socialText: { fontSize: 13, color: theme.mutedForeground },
   commentCard: {
-    backgroundColor: theme.card,
+    backgroundColor: "rgba(255,255,255,0.02)",
     borderRadius: theme.radiusLg,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.border,

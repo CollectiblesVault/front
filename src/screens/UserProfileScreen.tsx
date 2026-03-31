@@ -1,9 +1,9 @@
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
-import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, FolderOpen, LayoutGrid, MessageCircle, ThumbsUp, TrendingUp } from "lucide-react-native";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Bookmark, ChevronLeft, FolderOpen, LayoutGrid, MessageCircle, ThumbsUp, TrendingUp } from "lucide-react-native";
+import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ErrorState } from "../components/ErrorState";
@@ -12,8 +12,15 @@ import { ImageWithFallback } from "../components/ImageWithFallback";
 import { TabAwareScrollView } from "../components/TabAwareScrollView";
 import { useAppSettings } from "../context/app-settings-context";
 import { useCollectionsStore } from "../context/collections-store-context";
-// actions (лайк/комментарий/желания) доступны в `ItemDetailScreen`
-import { getPublicUserApi, getUserCollectionsApi } from "../api/vaultApi";
+import { useWishlist } from "../context/wishlist-context";
+import {
+  createItemCommentApi,
+  getPublicCollectionItemsApi,
+  getPublicUserApi,
+  getUserCollectionsApi,
+  likeItemApi,
+  unlikeItemApi,
+} from "../api/vaultApi";
 import type { RootStackParamList } from "../navigation/types";
 import { theme } from "../theme";
 
@@ -24,13 +31,17 @@ export function UserProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const route = useRoute<R>();
-  const { formatMoney, authToken } = useAppSettings();
+  const { formatMoney, authToken, canInteract } = useAppSettings();
+  const { toggleWishlist, isInWishlist } = useWishlist();
   useCollectionsStore();
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<any | null>(null);
   const [collections, setCollections] = useState<any[]>([]);
+  const [itemsByCollection, setItemsByCollection] = useState<Record<number, any[]>>({});
+  const [likedByItemId, setLikedByItemId] = useState<Record<number, boolean>>({});
+  const [commentDraftByItemId, setCommentDraftByItemId] = useState<Record<number, string>>({});
 
   const load = async () => {
     setIsLoading(true);
@@ -43,12 +54,107 @@ export function UserProfileScreen() {
       ]);
       setUser(u ?? null);
       setCollections(cols ?? []);
+      const normalizedCollections = (cols ?? []).map((c: any) => Number(c?.id ?? c?.collection_id)).filter(Number.isFinite);
+      const pairs = await Promise.all(
+        normalizedCollections.map(async (collectionId: number) => {
+          try {
+            const items = await getPublicCollectionItemsApi({ collectionId });
+            return [collectionId, items ?? []] as const;
+          } catch {
+            return [collectionId, []] as const;
+          }
+        }),
+      );
+      setItemsByCollection(Object.fromEntries(pairs));
     } catch (e: any) {
       setError(e?.message ? String(e.message) : "Не удалось загрузить профиль.");
     } finally {
       setIsLoading(false);
     }
   };
+
+  const requireAuth = useCallback(
+    (action: () => void) => {
+      if (!canInteract) {
+        Alert.alert("Нужен вход", "Войдите в аккаунт для лайков, избранного и комментариев.");
+        return;
+      }
+      action();
+    },
+    [canInteract],
+  );
+
+  const onLikeToggle = useCallback(
+    (itemId: number) => {
+      requireAuth(() => {
+        const next = !Boolean(likedByItemId[itemId]);
+        setLikedByItemId((prev) => ({ ...prev, [itemId]: next }));
+        if (!authToken) return;
+        void (next ? likeItemApi({ token: authToken, itemId }) : unlikeItemApi({ token: authToken, itemId })).catch(() => {
+          setLikedByItemId((prev) => ({ ...prev, [itemId]: !next }));
+        });
+      });
+    },
+    [authToken, likedByItemId, requireAuth],
+  );
+
+  const onWishlistToggle = useCallback(
+    (item: any) => {
+      requireAuth(() => {
+        const id = Number(item?.id ?? item?.item_id);
+        if (!Number.isFinite(id)) return;
+        const price = Number(item?.price ?? 0) || 0;
+        void toggleWishlist({
+          id,
+          name: String(item?.name ?? `Предмет ${id}`),
+          category: String(item?.category_name ?? item?.category ?? "—"),
+          estimatedPrice: price,
+          image: String(item?.image_url ?? item?.image ?? ""),
+          notes: "",
+        });
+      });
+    },
+    [requireAuth, toggleWishlist],
+  );
+
+  const onSubmitComment = useCallback(
+    (itemId: number) => {
+      const text = (commentDraftByItemId[itemId] ?? "").trim();
+      if (!text) return;
+      requireAuth(() => {
+        setCommentDraftByItemId((prev) => ({ ...prev, [itemId]: "" }));
+        if (!authToken) return;
+        void createItemCommentApi({ token: authToken, itemId, text }).catch(() => {
+          Alert.alert("Комментарий не отправлен", "Попробуйте ещё раз.");
+        });
+      });
+    },
+    [authToken, commentDraftByItemId, requireAuth],
+  );
+
+  const toPreviewItems = useCallback((collectionId: number) => {
+    return (itemsByCollection[collectionId] ?? [])
+      .map((item: any) => {
+        const itemId = Number(item?.id ?? item?.item_id);
+        if (!Number.isFinite(itemId)) return null;
+        return {
+          id: itemId,
+          name: String(item?.name ?? `Предмет ${itemId}`),
+          category: String(item?.category_name ?? item?.category ?? "—"),
+          price: Number(item?.price ?? 0) || 0,
+          description: String(item?.description ?? ""),
+          imageUrl: String(item?.image_url ?? item?.image ?? ""),
+        };
+      })
+      .filter(Boolean) as Array<{
+      id: number;
+      name: string;
+      category: string;
+      price: number;
+      description: string;
+      imageUrl: string;
+    }>;
+  }, [itemsByCollection]);
 
   useEffect(() => {
     void load();
@@ -147,10 +253,103 @@ export function UserProfileScreen() {
                     </Text>
                   </View>
                 </View>
-
-                    <Text style={styles.note}>
-                      Детали предметов этой коллекции доступны при наличии API для публичных предметов пользователя.
-                            </Text>
+                    <TouchableOpacity
+                      style={styles.openCollectionBtn}
+                      activeOpacity={0.9}
+                      onPress={() =>
+                        navigation.navigate("CollectionDetail", {
+                          id: String(id),
+                          browse: true,
+                          collectionPreview: {
+                            name,
+                            imageUrl: img,
+                            isPublic: true,
+                          },
+                          itemsPreview: toPreviewItems(id),
+                        })
+                      }
+                    >
+                      <Text style={styles.openCollectionBtnText}>Открыть коллекцию полностью</Text>
+                    </TouchableOpacity>
+                    <View style={styles.itemsWrap}>
+                      {(itemsByCollection[id] ?? []).map((item: any) => {
+                        const itemId = Number(item?.id ?? item?.item_id);
+                        if (!Number.isFinite(itemId)) return null;
+                        const itemName = String(item?.name ?? `Предмет ${itemId}`);
+                        const itemImage = String(item?.image_url ?? item?.image ?? "");
+                        const itemDescription = String(item?.description ?? "");
+                        const itemPrice = Number(item?.price ?? 0) || 0;
+                        const itemCategory = String(item?.category_name ?? item?.category ?? "—");
+                        const liked = Boolean(likedByItemId[itemId]);
+                        const wished = isInWishlist(itemId);
+                        return (
+                          <View key={itemId} style={styles.itemCard}>
+                            <TouchableOpacity
+                              onPress={() =>
+                                navigation.navigate("ItemDetail", {
+                                  id: String(itemId),
+                                  browse: true,
+                                  collectionId: String(id),
+                                  itemPreview: {
+                                    id: itemId,
+                                    name: itemName,
+                                    category: itemCategory,
+                                    price: itemPrice,
+                                    description: itemDescription,
+                                    imageUrl: itemImage,
+                                  },
+                                })
+                              }
+                              activeOpacity={0.9}
+                            >
+                              <View style={{ flexDirection: "row", gap: 12 }}>
+                                <ImageWithFallback uri={itemImage} style={styles.itemImg} borderRadius={10} />
+                                <View style={styles.itemBody}>
+                                  <Text style={styles.itemName} numberOfLines={1}>{itemName}</Text>
+                                  <Text style={styles.itemDesc} numberOfLines={2}>{itemDescription || "—"}</Text>
+                                  <Text style={styles.itemPrice}>{formatMoney(itemPrice)}</Text>
+                                </View>
+                              </View>
+                            </TouchableOpacity>
+                            <View style={styles.itemActionsRow}>
+                              <TouchableOpacity
+                                style={[styles.itemActionBtn, liked && styles.itemActionBtnActive]}
+                                onPress={() => onLikeToggle(itemId)}
+                                activeOpacity={0.9}
+                              >
+                                <ThumbsUp size={14} color={liked ? theme.primary : theme.mutedForeground} />
+                                <Text style={styles.itemActionText}>{liked ? "Лайк стоит" : "Лайк"}</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={[styles.itemActionBtn, wished && styles.itemActionBtnActive]}
+                                onPress={() => onWishlistToggle(item)}
+                                activeOpacity={0.9}
+                              >
+                                <Bookmark size={14} color={wished ? theme.primary : theme.mutedForeground} />
+                                <Text style={styles.itemActionText}>{wished ? "В избранном" : "В избранное"}</Text>
+                              </TouchableOpacity>
+                            </View>
+                            <View style={styles.itemActionsRow}>
+                              <TextInput
+                                value={commentDraftByItemId[itemId] ?? ""}
+                                onChangeText={(t) => setCommentDraftByItemId((prev) => ({ ...prev, [itemId]: t }))}
+                                placeholder={canInteract ? "Комментарий..." : "Войдите, чтобы комментировать"}
+                                placeholderTextColor={theme.mutedForeground}
+                                style={[styles.profileInputEmail, { flex: 1, marginTop: 0 }]}
+                                editable={canInteract}
+                              />
+                              <TouchableOpacity style={styles.itemActionBtn} onPress={() => onSubmitComment(itemId)} activeOpacity={0.9}>
+                                <MessageCircle size={14} color={theme.mutedForeground} />
+                                <Text style={styles.itemActionText}>Отпр.</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        );
+                      })}
+                      {(itemsByCollection[id] ?? []).length === 0 ? (
+                        <Text style={styles.note}>В этой публичной коллекции пока нет предметов.</Text>
+                      ) : null}
+                    </View>
               </View>
             );
               })
@@ -225,10 +424,20 @@ const styles = StyleSheet.create({
   collectionThumbImg: { width: "100%", height: "100%" },
   collectionName: { fontSize: 14, fontWeight: "700", color: theme.foreground },
   collectionSub: { fontSize: 12, color: theme.mutedForeground, marginTop: 4 },
+  openCollectionBtn: {
+    marginBottom: 10,
+    borderRadius: theme.radiusLg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.primary,
+    backgroundColor: "rgba(212,175,55,0.12)",
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  openCollectionBtnText: { fontSize: 12, fontWeight: "700", color: theme.primary },
   itemsWrap: { flexDirection: "column", gap: 10 },
   itemCard: {
-    flexDirection: "row",
-    gap: 12,
+    flexDirection: "column",
+    gap: 8,
     backgroundColor: theme.background,
     borderRadius: theme.radiusXl,
     borderWidth: StyleSheet.hairlineWidth,
@@ -255,7 +464,7 @@ const styles = StyleSheet.create({
   itemActionsRow: { flexDirection: "row", gap: 8, marginTop: 6, alignItems: "center" },
   itemActionBtn: {
     flex: 1,
-    backgroundColor: theme.card,
+    backgroundColor: "rgba(255,255,255,0.02)",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.border,
     borderRadius: theme.radiusLg,
@@ -264,6 +473,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     flexDirection: "row",
     gap: 8,
+  },
+  itemActionBtnActive: {
+    borderColor: theme.primary,
+    backgroundColor: "rgba(212,175,55,0.12)",
   },
   itemActionText: { fontSize: 12, fontWeight: "700", color: theme.foreground },
 });

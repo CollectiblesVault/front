@@ -1,7 +1,6 @@
 import { NavigationContainer, DefaultTheme } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
-import { TabTransitionOverlay } from "../components/TabTransitionOverlay";
 import { useTabTransition } from "../context/tab-transition-context";
 import { BootstrapScreen } from "../screens/BootstrapScreen";
 import { CollectionDetailScreen } from "../screens/CollectionDetailScreen";
@@ -43,7 +42,7 @@ export function RootNavigator() {
           screenOptions={{
             headerShown: false,
             contentStyle: { backgroundColor: theme.background },
-            animation: "slide_from_right",
+            animation: "none",
           }}
         >
           <Stack.Screen name="Bootstrap" component={BootstrapScreen} />
@@ -60,7 +59,7 @@ export function RootNavigator() {
           <Stack.Screen name="UserProfile" component={UserProfileScreen} />
         </Stack.Navigator>
       </NavigationContainer>
-      <TabTransitionOverlay />
+      {/* Disabled to avoid page fly-in transitions */}
     </>
   );
 }

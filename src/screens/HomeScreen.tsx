@@ -1,8 +1,9 @@
 import { CommonActions, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { Award, FolderOpen, Heart, TrendingUp, User } from "lucide-react-native";
+import { Award, FolderOpen, Heart, TrendingUp } from "lucide-react-native";
 import { useCallback, useState } from "react";
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Modal,
@@ -19,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomNav } from "../components/BottomNav";
 import { CurrencyIcon } from "../components/CurrencyIcon";
+import { ImageWithFallback } from "../components/ImageWithFallback";
 import { TabAwareScrollView } from "../components/TabAwareScrollView";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { useAppSettings } from "../context/app-settings-context";
@@ -27,6 +29,7 @@ import { theme } from "../theme";
 import { CURRENCY_CODES, getCurrencyLabel } from "../utils/formatMoney";
 import { useCollectionsStore } from "../context/collections-store-context";
 import { useWishlist } from "../context/wishlist-context";
+import { patchMeApi, uploadMyAvatarApi } from "../api/vaultApi";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "Home">;
 
@@ -44,6 +47,7 @@ export function HomeScreen() {
     setHideFromSearch,
     userProfile,
     setUserProfile,
+    authToken,
     logout,
     formatMoney,
   } = useAppSettings();
@@ -51,6 +55,7 @@ export function HomeScreen() {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [profileNameDraft, setProfileNameDraft] = useState("");
   const [profileEmailDraft, setProfileEmailDraft] = useState("");
+  const [profileAvatarDraft, setProfileAvatarDraft] = useState("");
   const { collectionsList } = useCollectionsStore();
   const { entries: wishlistEntries } = useWishlist();
 
@@ -81,6 +86,56 @@ export function HomeScreen() {
     );
   }, [logout, navigation]);
 
+  const pickAvatarFromDevice = useCallback(() => {
+    Alert.alert("Загрузить аватар", "Выберите источник", [
+      {
+        text: "Камера",
+        onPress: async () => {
+          try {
+            const ImagePicker = await import("expo-image-picker");
+            const perm = await ImagePicker.requestCameraPermissionsAsync();
+            if (perm.status !== "granted") {
+              Alert.alert("Нет доступа", "Разрешите доступ к камере.");
+              return;
+            }
+            const res = await ImagePicker.launchCameraAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
+              quality: 0.85,
+            });
+            const uri = res.assets?.[0]?.uri;
+            if (!res.canceled && uri) setProfileAvatarDraft(uri);
+          } catch {
+            Alert.alert("Ошибка", "Не удалось выбрать фото.");
+          }
+        },
+      },
+      {
+        text: "Галерея",
+        onPress: async () => {
+          try {
+            const ImagePicker = await import("expo-image-picker");
+            const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (perm.status !== "granted") {
+              Alert.alert("Нет доступа", "Разрешите доступ к галерее.");
+              return;
+            }
+            const res = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
+              quality: 0.85,
+            });
+            const uri = res.assets?.[0]?.uri;
+            if (!res.canceled && uri) setProfileAvatarDraft(uri);
+          } catch {
+            Alert.alert("Ошибка", "Не удалось выбрать фото.");
+          }
+        },
+      },
+      { text: "Отмена", style: "cancel" },
+    ]);
+  }, []);
+
   return (
     <View style={styles.root}>
       <OfflineBanner isOffline={isOffline} />
@@ -104,6 +159,7 @@ export function HomeScreen() {
               if (userProfile) {
                 setProfileNameDraft(userProfile.displayName);
                 setProfileEmailDraft(userProfile.email);
+                setProfileAvatarDraft(userProfile.avatarUrl ?? "");
               }
               setAccountMenuOpen(true);
             }}
@@ -111,7 +167,7 @@ export function HomeScreen() {
             activeOpacity={0.85}
             accessibilityLabel="Аккаунт и валюта"
           >
-            <User size={20} color={theme.primary} strokeWidth={2} />
+            <ImageWithFallback uri={userProfile?.avatarUrl || ""} style={styles.accountAvatar} borderRadius={999} />
           </TouchableOpacity>
         </View>
 
@@ -180,6 +236,10 @@ export function HomeScreen() {
               <>
                 <Text style={styles.sheetTitle}>Профиль</Text>
                 <View style={styles.profileBlock}>
+                  <TouchableOpacity style={styles.avatarPickerCenter} onPress={pickAvatarFromDevice} activeOpacity={0.88}>
+                    <ImageWithFallback uri={profileAvatarDraft || userProfile.avatarUrl || ""} style={styles.avatarPreview} borderRadius={999} />
+                    <Text style={styles.avatarPickerHint}>Нажмите, чтобы загрузить аватар</Text>
+                  </TouchableOpacity>
                   <TextInput
                     value={profileNameDraft}
                     onChangeText={setProfileNameDraft}
@@ -200,11 +260,76 @@ export function HomeScreen() {
                 </View>
                 <TouchableOpacity
                   style={styles.saveBtn}
-                  onPress={() => {
+                  onPress={async () => {
                     const nextName = profileNameDraft.trim() || userProfile.displayName;
                     const nextEmail = profileEmailDraft.trim() || userProfile.email;
-                    setUserProfile({ ...userProfile, displayName: nextName, email: nextEmail });
-                    setAccountMenuOpen(false);
+                    const nextAvatar = profileAvatarDraft.trim() || userProfile.avatarUrl || "";
+
+                    // Optimistic local update keeps UI responsive.
+                    const prevProfile = userProfile;
+                    setUserProfile({ ...userProfile, displayName: nextName, email: nextEmail, avatarUrl: nextAvatar });
+
+                    if (!authToken) {
+                      setAccountMenuOpen(false);
+                      return;
+                    }
+
+                    try {
+                      if (authToken && profileAvatarDraft.trim()) {
+                        const isRemoteUrl = /^https?:\/\//i.test(profileAvatarDraft.trim());
+                        if (isRemoteUrl) {
+                          await patchMeApi({
+                            token: authToken,
+                            patch: { avatar_url: profileAvatarDraft.trim() },
+                          });
+                        } else {
+                          await uploadMyAvatarApi({
+                            token: authToken,
+                            fileUri: profileAvatarDraft.trim(),
+                          });
+                        }
+                      }
+                      const updated = await patchMeApi({
+                        token: authToken,
+                        patch: { display_name: nextName, email: nextEmail },
+                      });
+
+                      const resolvedEmail =
+                        typeof updated?.email === "string"
+                          ? updated.email
+                          : typeof updated?.user?.email === "string"
+                            ? updated.user.email
+                            : nextEmail;
+                      const resolvedName =
+                        typeof updated?.display_name === "string"
+                          ? updated.display_name
+                          : typeof updated?.displayName === "string"
+                            ? updated.displayName
+                            : typeof updated?.user?.display_name === "string"
+                              ? updated.user.display_name
+                              : typeof updated?.user?.displayName === "string"
+                                ? updated.user.displayName
+                                : nextName;
+                      const resolvedAvatar =
+                        typeof updated?.avatar_url === "string"
+                          ? updated.avatar_url
+                          : typeof updated?.avatarUrl === "string"
+                            ? updated.avatarUrl
+                            : typeof updated?.user?.avatar_url === "string"
+                              ? updated.user.avatar_url
+                              : typeof updated?.user?.avatarUrl === "string"
+                                ? updated.user.avatarUrl
+                                : nextAvatar;
+
+                      setUserProfile({ ...prevProfile, displayName: resolvedName, email: resolvedEmail, avatarUrl: resolvedAvatar });
+                      setAccountMenuOpen(false);
+                    } catch (e: any) {
+                      setUserProfile(prevProfile);
+                      Alert.alert(
+                        "Не удалось сохранить профиль",
+                        e?.message ? String(e.message) : "Проверьте соединение и попробуйте ещё раз.",
+                      );
+                    }
                   }}
                   activeOpacity={0.88}
                 >
@@ -320,6 +445,11 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: theme.radiusLg,
     backgroundColor: "rgba(212,175,55,0.12)",
+  },
+  accountAvatar: {
+    width: 20,
+    height: 20,
+    backgroundColor: theme.background,
   },
   statsGrid: {
     flexDirection: "row",
@@ -455,6 +585,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.border,
   },
+  avatarPickerCenter: { alignItems: "center", justifyContent: "center", marginBottom: 8 },
+  avatarPreview: { width: 88, height: 88, backgroundColor: theme.background },
+  avatarPickerHint: { fontSize: 12, color: theme.mutedForeground, marginTop: 8 },
   profileName: { fontSize: 18, fontWeight: "600", color: theme.foreground },
   profileEmail: { fontSize: 14, color: theme.mutedForeground, marginTop: 4 },
   profileInputName: {

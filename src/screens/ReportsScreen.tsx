@@ -10,6 +10,7 @@ import {
   Share,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -22,7 +23,9 @@ import { DonutChart } from "../components/DonutChart";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/LoadingState";
 import { useAppSettings } from "../context/app-settings-context";
-import { reportsActivityApi, reportsSummaryApi, reportsSummaryCsvApi } from "../api/vaultApi";
+import { useCollectionsStore } from "../context/collections-store-context";
+import { useWishlist } from "../context/wishlist-context";
+import { reportsCollectionsCsvApi, reportsItemsCsvApi, reportsSummaryCsvUnifiedApi } from "../api/vaultApi";
 import { theme } from "../theme";
 
 type TimeRange = "week" | "month" | "year";
@@ -34,12 +37,83 @@ interface ReportSections {
   topPerformers: boolean;
 }
 
+type CsvMetric = "collections" | "items" | "likes" | "comments" | "wishlist";
+type CsvSummaryRow = {
+  period: TimeRange;
+  date: string;
+  metric: CsvMetric;
+  value: number;
+};
+
 const defaultSections: ReportSections = {
   portfolioCard: true,
   growthChart: true,
   categories: true,
   topPerformers: true,
 };
+
+function formatDateLabel(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function toIsoRangeStart(date: Date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+function toIsoRangeEnd(date: Date) {
+  const d = new Date(date);
+  d.setHours(23, 59, 59, 999);
+  return d.toISOString();
+}
+
+function atDateStart(date: Date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function sameDay(a: Date, b: Date) {
+  return atDateStart(a).getTime() === atDateStart(b).getTime();
+}
+
+function isBetweenDays(target: Date, from: Date, to: Date) {
+  const t = atDateStart(target).getTime();
+  const f = atDateStart(from).getTime();
+  const z = atDateStart(to).getTime();
+  return t >= Math.min(f, z) && t <= Math.max(f, z);
+}
+
+function monthLabel(date: Date) {
+  return date.toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
+}
+
+function buildCalendarCells(viewMonth: Date) {
+  const year = viewMonth.getFullYear();
+  const month = viewMonth.getMonth();
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: Array<Date | null> = [];
+  for (let i = 0; i < firstWeekday; i += 1) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d += 1) cells.push(new Date(year, month, d));
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
+function withReportType(csv: string, reportType: "collections" | "items") {
+  const lines = csv
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return "";
+  const [header, ...rows] = lines;
+  const normalizedRows = rows.map((row) => `${reportType},${row}`);
+  return [`report_type,${header}`, ...normalizedRows].join("\n");
+}
 
 function useEnterAnim(delayMs: number) {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -62,15 +136,32 @@ function useEnterAnim(delayMs: number) {
 
 export function ReportsScreen() {
   const insets = useSafeAreaInsets();
-  const { formatMoney, userProfile, authToken } = useAppSettings();
+  const { formatMoney, authToken } = useAppSettings();
+  const { collectionsList } = useCollectionsStore();
+  const { entries: wishlistEntries } = useWishlist();
   const [isOffline] = useState(false);
-  const [timeRange, setTimeRange] = useState<TimeRange>("month");
+  const [timeRange] = useState<TimeRange>("week");
   const [filterOpen, setFilterOpen] = useState(false);
   const [sections, setSections] = useState<ReportSections>(defaultSections);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [summary, setSummary] = useState<any | null>(null);
-  const [activity, setActivity] = useState<any | null>(null);
+  const [csvRows, setCsvRows] = useState<CsvSummaryRow[]>([]);
+  const [isExportRangeOpen, setIsExportRangeOpen] = useState(false);
+  const [exportFromDate, setExportFromDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d;
+  });
+  const [exportToDate, setExportToDate] = useState(() => new Date());
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date());
+  const [rangeDraftFrom, setRangeDraftFrom] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d;
+  });
+  const [rangeDraftTo, setRangeDraftTo] = useState(() => new Date());
+  const [rangeStep, setRangeStep] = useState<"from" | "to">("from");
 
   const portfolioAnim = useEnterAnim(40);
   const growthAnim = useEnterAnim(80);
@@ -83,26 +174,26 @@ export function ReportsScreen() {
   const rangeLabel = (r: TimeRange) => (r === "week" ? "7 дней" : r === "month" ? "30 дней" : "1 год");
 
   const series = useMemo(() => {
-    const raw = activity?.series ?? activity?.data ?? activity?.items ?? null;
-    if (!Array.isArray(raw)) return [];
-    return raw
-      .map((r: any) => ({
-        label: String(r?.label ?? r?.interval ?? r?.date ?? ""),
-        items: Number(r?.items ?? r?.items_count ?? r?.itemsDelta ?? 0) || 0,
-      }))
-      .filter((r: any) => r.label);
-  }, [activity]);
+    const byDate = new Map<string, { date: string; items: number }>();
+    for (const row of csvRows) {
+      if (row.metric !== "items") continue;
+      byDate.set(row.date, { date: row.date, items: row.value });
+    }
+    return [...byDate.values()]
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((entry) => ({ label: entry.date, items: entry.items }));
+  }, [csvRows]);
 
   const maxBar = useMemo(() => Math.max(1, ...series.map((d: any) => d.items)), [series]);
 
   const donutLegend = useMemo(() => {
-    const sums = {
-      collections: Number(summary?.collections ?? summary?.collections_count ?? 0) || 0,
-      items: Number(summary?.items ?? summary?.items_count ?? 0) || 0,
-      likes: Number(summary?.likes ?? summary?.likes_count ?? 0) || 0,
-      comments: Number(summary?.comments ?? summary?.comments_count ?? 0) || 0,
-      wishlist: Number(summary?.wishlist ?? summary?.wishlist_count ?? 0) || 0,
-    };
+    const sums = csvRows.reduce(
+      (acc, row) => {
+        acc[row.metric] += row.value;
+        return acc;
+      },
+      { collections: 0, items: 0, likes: 0, comments: 0, wishlist: 0 },
+    );
 
     const palette = [
       { label: "Коллекции", key: "collections" as const, color: theme.primary },
@@ -117,7 +208,7 @@ export function ReportsScreen() {
       value: sums[p.key],
       color: p.color,
     }));
-  }, [summary]);
+  }, [csvRows]);
 
   const donutData = useMemo(
     () =>
@@ -128,31 +219,56 @@ export function ReportsScreen() {
     [donutLegend],
   );
 
+  const portfolioCollections = collectionsList.length;
+  const portfolioItems = collectionsList.reduce((sum, c) => sum + c.itemCount, 0);
+  const portfolioTotalUsd = collectionsList.reduce((sum, c) => sum + c.totalValue, 0);
+  const portfolioWishlist = wishlistEntries.length;
+
   const handleExport = useCallback(async () => {
+    setIsExportRangeOpen(true);
+  }, []);
+
+  const runRangeExport = useCallback(async () => {
     try {
       if (authToken == null) {
         Alert.alert("Нужен вход", "Экспорт отчётов доступен после входа.");
         return;
       }
-      const csv = await Promise.all([
-        reportsSummaryCsvApi({ token: authToken, period: "week" }),
-        reportsSummaryCsvApi({ token: authToken, period: "month" }),
-        reportsSummaryCsvApi({ token: authToken, period: "year" }),
-      ]).then((parts) => parts.join("\n"));
+      const parsedFrom = atDateStart(exportFromDate);
+      const parsedTo = atDateStart(exportToDate);
+      if (parsedFrom > parsedTo) {
+        Alert.alert("Неверный диапазон", "Дата 'С' не может быть позже даты 'По'.");
+        return;
+      }
+      setExportFromDate(parsedFrom);
+      setExportToDate(parsedTo);
+      const fromDate = toIsoRangeStart(parsedFrom);
+      const toDate = toIsoRangeEnd(parsedTo);
+      const [collectionsCsv, itemsCsv] = await Promise.all([
+        reportsCollectionsCsvApi({ token: authToken, fromDate, toDate }),
+        reportsItemsCsvApi({ token: authToken, fromDate, toDate }),
+      ]);
+      const csv = [withReportType(collectionsCsv, "collections"), withReportType(itemsCsv, "items")]
+        .filter(Boolean)
+        .join("\n");
+      if (!csv.trim()) {
+        Alert.alert("Нет данных", "За выбранный период отчёт пуст.");
+        return;
+      }
+      const fileLabel = `${formatDateLabel(parsedFrom)}_${formatDateLabel(parsedTo)}`;
+      setIsExportRangeOpen(false);
 
-      // Web: создаём файл через Blob и запускаем скачивание.
       if (Platform.OS === "web") {
         const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `report_${Date.now()}.csv`;
+        a.download = `report_${fileLabel}.csv`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 800);
         return;
       }
 
-      // Мобильные платформы: сохраняем файл через expo-file-system и открываем share-sheet.
       const FileSystem = await import("expo-file-system/legacy");
       const Sharing = await import("expo-sharing");
 
@@ -162,7 +278,7 @@ export function ReportsScreen() {
         return;
       }
 
-      const fileUri = `${baseDir}report_${Date.now()}.csv`;
+      const fileUri = `${baseDir}report_${fileLabel}.csv`;
       await FileSystem.writeAsStringAsync(fileUri, csv, {
         encoding: FileSystem.EncodingType.UTF8,
       });
@@ -175,7 +291,51 @@ export function ReportsScreen() {
     } catch {
       Alert.alert("Не удалось поделиться", "Попробуйте ещё раз.");
     }
-  }, [authToken]);
+  }, [authToken, exportFromDate, exportToDate]);
+
+  const openRangeCalendar = useCallback(() => {
+    setRangeDraftFrom(exportFromDate);
+    setRangeDraftTo(exportToDate);
+    setCalendarMonth(exportFromDate);
+    setRangeStep("from");
+    setIsCalendarOpen(true);
+  }, [exportFromDate, exportToDate]);
+
+  const onSelectCalendarDate = useCallback((date: Date) => {
+    if (rangeStep === "from") {
+      setRangeDraftFrom(date);
+      setRangeDraftTo(date);
+      setRangeStep("to");
+      return;
+    }
+    if (date < rangeDraftFrom) {
+      setRangeDraftFrom(date);
+      setRangeDraftTo(rangeDraftFrom);
+    } else {
+      setRangeDraftTo(date);
+    }
+  }, [rangeDraftFrom, rangeStep]);
+
+  const applyCalendarRange = useCallback(() => {
+    setExportFromDate(rangeDraftFrom);
+    setExportToDate(rangeDraftTo);
+    setIsCalendarOpen(false);
+  }, [rangeDraftFrom, rangeDraftTo]);
+
+  const applyPreset = useCallback((preset: "7d") => {
+    const today = atDateStart(new Date());
+    if (preset === "7d") {
+      const from = new Date(today);
+      from.setDate(from.getDate() - 6);
+      setRangeDraftFrom(from);
+      setRangeDraftTo(today);
+      setCalendarMonth(from);
+      setRangeStep("to");
+      return;
+    }
+  }, []);
+
+  const calendarCells = useMemo(() => buildCalendarCells(calendarMonth), [calendarMonth]);
 
   const toggleSection = useCallback((key: keyof ReportSections) => {
     setSections((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -189,8 +349,7 @@ export function ReportsScreen() {
 
   const refreshStatsFromApi = useCallback(async () => {
     if (authToken == null) {
-      setSummary(null);
-      setActivity(null);
+      setCsvRows([]);
       setIsLoading(false);
       setError(null);
       return;
@@ -198,12 +357,30 @@ export function ReportsScreen() {
     setIsLoading(true);
     setError(null);
     try {
-      const [s, a] = await Promise.all([
-        reportsSummaryApi({ token: authToken, period: timeRange }),
-        reportsActivityApi({ token: authToken, period: timeRange }),
-      ]);
-      setSummary(s ?? null);
-      setActivity(a ?? null);
+      const csv = await reportsSummaryCsvUnifiedApi({ token: authToken, period: timeRange });
+      const parsedRows = csv
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(1)
+        .map((line) => line.split(",").map((cell) => cell.trim()))
+        .filter((parts) => parts.length >= 4)
+        .map((parts) => ({
+          period: parts[0] as TimeRange,
+          date: parts[1],
+          metric: parts[2] as CsvMetric,
+          value: Number(parts[3]) || 0,
+        }))
+        .filter(
+          (row) =>
+            (row.period === "week" || row.period === "month" || row.period === "year") &&
+            (row.metric === "collections" ||
+              row.metric === "items" ||
+              row.metric === "likes" ||
+              row.metric === "comments" ||
+              row.metric === "wishlist"),
+        );
+      setCsvRows(parsedRows);
     } catch (e: any) {
       setError(e?.message ? String(e.message) : "Не удалось загрузить отчёт.");
     } finally {
@@ -255,17 +432,9 @@ export function ReportsScreen() {
         <Text style={styles.h1}>Отчёты и аналитика</Text>
         <View style={styles.filterRow}>
           <View style={styles.pillsWrap}>
-            {(["week", "month", "year"] as const).map((range) => (
-              <TouchableOpacity
-                key={range}
-                onPress={() => setTimeRange(range)}
-                style={[styles.pill, timeRange === range ? styles.pillOn : styles.pillOff]}
-              >
-                <Text style={[styles.pillText, timeRange === range && styles.pillTextOn]}>
-                  {rangeLabel(range)}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            <View style={[styles.pill, styles.pillOn]}>
+              <Text style={[styles.pillText, styles.pillTextOn]}>{rangeLabel("week")}</Text>
+            </View>
           </View>
           <TouchableOpacity style={styles.filterIcon} onPress={() => setFilterOpen(true)} accessibilityLabel="Фильтр разделов">
             <Filter size={16} color={theme.mutedForeground} />
@@ -296,13 +465,11 @@ export function ReportsScreen() {
               >
                 <Text style={styles.cardKicker}>Общая стоимость по вашим коллекциям</Text>
                 <Text style={styles.bigValue}>
-                  {formatMoney(Number(summary?.total_value_usd ?? summary?.totalValueUsd ?? 0) || 0)}
+                  {formatMoney(portfolioTotalUsd)}
                 </Text>
                 <View style={styles.trendRow}>
                   <Text style={styles.vs}>
-                    {Number(summary?.collections ?? summary?.collections_count ?? 0) || 0} коллекций •{" "}
-                    {Number(summary?.items ?? summary?.items_count ?? 0) || 0} предметов •{" "}
-                    {Number(summary?.wishlist ?? summary?.wishlist_count ?? 0) || 0} желаний
+                    {portfolioCollections} коллекций • {portfolioItems} предметов • {portfolioWishlist} желаний
                   </Text>
                 </View>
               </Animated.View>
@@ -380,13 +547,13 @@ export function ReportsScreen() {
                 <Text style={styles.cardTitle}>Итоги по действиям</Text>
                 <View style={{ gap: 10 }}>
                   <Text style={styles.vs}>
-                    Лайки: {Number(summary?.likes ?? summary?.likes_count ?? 0) || 0}
+                    Лайки: {donutLegend.find((d) => d.label === "Лайки")?.value ?? 0}
                   </Text>
                   <Text style={styles.vs}>
-                    Комментарии: {Number(summary?.comments ?? summary?.comments_count ?? 0) || 0}
+                    Комментарии: {donutLegend.find((d) => d.label === "Комментарии")?.value ?? 0}
                   </Text>
                   <Text style={styles.vs}>
-                    В желаниях: {Number(summary?.wishlist ?? summary?.wishlist_count ?? 0) || 0}
+                    В желаниях: {donutLegend.find((d) => d.label === "В желаниях")?.value ?? 0}
                   </Text>
                 </View>
               </Animated.View>
@@ -439,6 +606,108 @@ export function ReportsScreen() {
             ) : null}
             <TouchableOpacity style={styles.filterClose} onPress={() => setFilterOpen(false)} activeOpacity={0.88}>
               <Text style={styles.filterCloseText}>Готово</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+      <Modal visible={isExportRangeOpen} animationType="fade" transparent>
+        <Pressable style={styles.modalBackdrop} onPress={() => setIsExportRangeOpen(false)}>
+          <Pressable style={[styles.filterSheet, { paddingBottom: Math.max(insets.bottom, 16) }]} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.filterSheetTitle}>Экспорт CSV</Text>
+            <Text style={styles.filterSheetSub}>Выберите диапазон дат отчета</Text>
+            <View style={styles.toggleRow}>
+              <Text style={styles.toggleLabel}>С даты</Text>
+              <Text style={styles.togglePillTextOn}>{formatDateLabel(exportFromDate)}</Text>
+            </View>
+            <View style={styles.toggleRow}>
+              <Text style={styles.toggleLabel}>По дату</Text>
+              <Text style={styles.togglePillTextOn}>{formatDateLabel(exportToDate)}</Text>
+            </View>
+            <TouchableOpacity style={styles.enableAllBtn} onPress={openRangeCalendar} activeOpacity={0.88}>
+              <Text style={styles.enableAllText}>Открыть календарь</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.enableAllBtn} onPress={() => void runRangeExport()} activeOpacity={0.88}>
+              <Text style={styles.enableAllText}>Скачать CSV</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.filterClose} onPress={() => setIsExportRangeOpen(false)} activeOpacity={0.88}>
+              <Text style={styles.filterCloseText}>Отмена</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+      <Modal visible={isCalendarOpen} animationType="fade" transparent>
+        <Pressable style={styles.modalBackdrop} onPress={() => setIsCalendarOpen(false)}>
+          <Pressable style={[styles.filterSheet, { paddingBottom: Math.max(insets.bottom, 16) }]} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.filterSheetTitle}>Календарь периода</Text>
+            <Text style={styles.filterSheetSub}>
+              {rangeStep === "from" ? "Выберите дату начала" : "Выберите дату конца"}
+            </Text>
+            <View style={styles.presetRow}>
+              <TouchableOpacity style={styles.presetBtn} onPress={() => applyPreset("7d")} activeOpacity={0.88}>
+                <Text style={styles.presetBtnText}>7 дней</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.calendarNavRow}>
+              <TouchableOpacity
+                style={styles.calendarNavBtn}
+                onPress={() => setCalendarMonth((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.calendarNavBtnText}>{"<"}</Text>
+              </TouchableOpacity>
+              <Text style={styles.calendarMonthText}>{monthLabel(calendarMonth)}</Text>
+              <TouchableOpacity
+                style={styles.calendarNavBtn}
+                onPress={() => setCalendarMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.calendarNavBtnText}>{">"}</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.calendarWeekHeader}>
+              {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((d) => (
+                <Text key={d} style={styles.calendarWeekCell}>{d}</Text>
+              ))}
+            </View>
+            <View style={styles.calendarGrid}>
+              {calendarCells.map((d, idx) => {
+                if (!d) return <View key={`empty-${idx}`} style={styles.calendarDayCell} />;
+                const selectedStart = sameDay(d, rangeDraftFrom);
+                const selectedEnd = sameDay(d, rangeDraftTo);
+                const inRange = isBetweenDays(d, rangeDraftFrom, rangeDraftTo);
+                return (
+                  <TouchableOpacity
+                    key={d.toISOString()}
+                    style={[
+                      styles.calendarDayCell,
+                      inRange && styles.calendarDayInRange,
+                      (selectedStart || selectedEnd) && styles.calendarDaySelected,
+                    ]}
+                    onPress={() => onSelectCalendarDate(d)}
+                    activeOpacity={0.85}
+                  >
+                    <Text
+                      style={[
+                        styles.calendarDayText,
+                        (selectedStart || selectedEnd) && styles.calendarDayTextSelected,
+                      ]}
+                    >
+                      {d.getDate()}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={styles.toggleRow}>
+              <Text style={styles.toggleLabel}>С</Text>
+              <Text style={styles.togglePillTextOn}>{formatDateLabel(rangeDraftFrom)}</Text>
+            </View>
+            <View style={styles.toggleRow}>
+              <Text style={styles.toggleLabel}>По</Text>
+              <Text style={styles.togglePillTextOn}>{formatDateLabel(rangeDraftTo)}</Text>
+            </View>
+            <TouchableOpacity style={styles.enableAllBtn} onPress={applyCalendarRange} activeOpacity={0.88}>
+              <Text style={styles.enableAllText}>Применить</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
@@ -611,6 +880,55 @@ const styles = StyleSheet.create({
   togglePillOn: { backgroundColor: theme.primary },
   togglePillText: { fontSize: 12, fontWeight: "600", color: theme.mutedForeground },
   togglePillTextOn: { color: theme.primaryForeground },
+  dateInput: {
+    minWidth: 132,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.border,
+    borderRadius: theme.radiusLg,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    color: theme.foreground,
+    fontSize: 13,
+    textAlign: "right",
+  },
+  calendarNavRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  calendarNavBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.border,
+    backgroundColor: theme.background,
+  },
+  calendarNavBtnText: { color: theme.foreground, fontWeight: "700" },
+  calendarMonthText: { fontSize: 14, fontWeight: "700", color: theme.foreground },
+  calendarWeekHeader: { flexDirection: "row", marginBottom: 6 },
+  calendarWeekCell: { flex: 1, textAlign: "center", fontSize: 11, color: theme.mutedForeground },
+  calendarGrid: { flexDirection: "row", flexWrap: "wrap", marginBottom: 10 },
+  calendarDayCell: {
+    width: "14.285%",
+    aspectRatio: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+  },
+  calendarDayInRange: { backgroundColor: "rgba(212,175,55,0.10)" },
+  calendarDaySelected: { backgroundColor: theme.primary },
+  calendarDayText: { fontSize: 13, color: theme.foreground },
+  calendarDayTextSelected: { color: theme.primaryForeground, fontWeight: "700" },
+  presetRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
+  presetBtn: {
+    flex: 1,
+    borderRadius: theme.radiusLg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.border,
+    backgroundColor: theme.background,
+    paddingVertical: 8,
+    alignItems: "center",
+  },
+  presetBtnText: { fontSize: 12, fontWeight: "600", color: theme.foreground },
   enableAllBtn: { marginTop: 12, alignItems: "center", paddingVertical: 12 },
   enableAllText: { fontSize: 14, fontWeight: "600", color: theme.primary },
   filterClose: { alignItems: "center", paddingVertical: 16 },

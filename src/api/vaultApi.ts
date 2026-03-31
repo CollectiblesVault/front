@@ -9,6 +9,8 @@ type ApiRequestOptions = {
   headers?: Record<string, string>;
 };
 
+type SummaryPeriod = "week" | "month" | "year";
+
 function toQueryString(query: ApiRequestOptions["query"]) {
   if (!query) return "";
   const parts: string[] = [];
@@ -122,12 +124,46 @@ export async function patchMeApi({
   });
 }
 
+export async function uploadMyAvatarApi({
+  token,
+  fileUri,
+  fileName = "avatar.jpg",
+  mimeType = "image/jpeg",
+}: {
+  token: string;
+  fileUri: string;
+  fileName?: string;
+  mimeType?: string;
+}) {
+  const authHeaderValue = /^Bearer\s+/i.test(token.trim()) ? token.trim() : `Bearer ${token.trim()}`;
+  const formData = new FormData();
+  formData.append("file", {
+    uri: fileUri,
+    name: fileName,
+    type: mimeType,
+  } as any);
+
+  const res = await fetch(`${BASE_URL}/api/auth/me/avatar`, {
+    method: "POST",
+    headers: {
+      authorization: authHeaderValue,
+      Accept: "application/json",
+    },
+    body: formData,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API error ${res.status}: ${text || res.statusText}`);
+  }
+  return (await res.json()) as any;
+}
+
 export async function reportsSummaryCsvApi({
   token,
   period,
 }: {
   token?: string | null;
-  period: "week" | "month" | "year";
+  period: SummaryPeriod;
 }) {
   return apiRequest<string>({
     method: "GET",
@@ -136,6 +172,88 @@ export async function reportsSummaryCsvApi({
     token,
     headers: { Accept: "text/csv" },
   });
+}
+
+const SUMMARY_CSV_HEADER = "period,date,metric,value";
+const SUMMARY_METRICS = new Set(["collections", "items", "likes", "comments", "wishlist"]);
+
+function parseCsvCellRow(line: string) {
+  // API currently returns simple CSV without escaped commas in values.
+  return line.split(",").map((cell) => cell.trim());
+}
+
+function normalizeSummaryCsv(csv: string, fallbackPeriod: SummaryPeriod): string[] {
+  const lines = csv
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return [];
+
+  const header = parseCsvCellRow(lines[0]).map((cell) => cell.toLowerCase());
+  const body = lines.slice(1);
+  const normalizedRows: string[] = [];
+
+  const periodIdx = header.indexOf("period");
+  const dateIdx = header.indexOf("date");
+  const metricIdx = header.indexOf("metric");
+  const valueIdx = header.indexOf("value");
+
+  // Already in long format: period,date,metric,value
+  if (dateIdx >= 0 && metricIdx >= 0 && valueIdx >= 0) {
+    for (const row of body) {
+      const cols = parseCsvCellRow(row);
+      const rowPeriod = periodIdx >= 0 ? cols[periodIdx] || fallbackPeriod : fallbackPeriod;
+      const rowDate = cols[dateIdx] ?? "";
+      const rowMetric = (cols[metricIdx] ?? "").toLowerCase();
+      const rowValue = cols[valueIdx] ?? "0";
+      if (!rowDate || !SUMMARY_METRICS.has(rowMetric)) continue;
+      normalizedRows.push(`${rowPeriod},${rowDate},${rowMetric},${rowValue}`);
+    }
+    return normalizedRows;
+  }
+
+  // Wide format fallback: date,collections,items,likes,comments,wishlist
+  if (dateIdx >= 0) {
+    const metricColumns = header
+      .map((name, idx) => ({ name, idx }))
+      .filter((entry) => SUMMARY_METRICS.has(entry.name));
+
+    for (const row of body) {
+      const cols = parseCsvCellRow(row);
+      const rowDate = cols[dateIdx] ?? "";
+      if (!rowDate) continue;
+      for (const metric of metricColumns) {
+        const metricValue = cols[metric.idx] ?? "0";
+        normalizedRows.push(`${fallbackPeriod},${rowDate},${metric.name},${metricValue}`);
+      }
+    }
+  }
+
+  return normalizedRows;
+}
+
+export async function reportsSummaryCsvUnifiedApi({
+  token,
+  period,
+}: {
+  token?: string | null;
+  period: SummaryPeriod;
+}) {
+  const raw = await reportsSummaryCsvApi({ token, period });
+  const rows = normalizeSummaryCsv(raw, period);
+  return [SUMMARY_CSV_HEADER, ...rows].join("\n");
+}
+
+export async function reportsSummaryCsvCombinedApi({
+  token,
+  periods = ["week", "month", "year"],
+}: {
+  token?: string | null;
+  periods?: SummaryPeriod[];
+}) {
+  const chunks = await Promise.all(periods.map((period) => reportsSummaryCsvApi({ token, period })));
+  const allRows = chunks.flatMap((chunk, idx) => normalizeSummaryCsv(chunk, periods[idx]));
+  return [SUMMARY_CSV_HEADER, ...allRows].join("\n");
 }
 
 export async function reportsSummaryApi({
@@ -516,9 +634,47 @@ export async function getLotsApi() {
   });
 }
 
+export async function getLotBidsApi({
+  lotId,
+  token,
+}: {
+  lotId: number;
+  token?: string | null;
+}) {
+  return apiRequest<any[]>({
+    method: "GET",
+    path: `/api/lots/${lotId}/bids`,
+    token,
+  });
+}
+
+export async function closeLotApi({
+  lotId,
+  token,
+}: {
+  lotId: number;
+  token?: string | null;
+}) {
+  return apiRequest<any>({
+    method: "POST",
+    path: `/api/lots/${lotId}/close`,
+    token,
+  });
+}
+
+export async function settleExpiredLotsApi({ token }: { token?: string | null }) {
+  return apiRequest<any>({
+    method: "POST",
+    path: "/api/lots/settle-expired",
+    token,
+  });
+}
+
 export async function createLotApi({
   token,
   name,
+  collection_id,
+  item_id,
   start_price,
   step,
   end_time,
@@ -526,6 +682,8 @@ export async function createLotApi({
 }: {
   token?: string | null;
   name: string;
+  collection_id: number;
+  item_id?: number | null;
   start_price: number | string;
   step: number | string;
   end_time: string;
@@ -537,6 +695,8 @@ export async function createLotApi({
     token,
     body: {
       name,
+      collection_id,
+      ...(item_id !== undefined ? { item_id } : {}),
       start_price,
       step,
       end_time,

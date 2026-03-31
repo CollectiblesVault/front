@@ -1,7 +1,7 @@
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Grid3x3, List, Plus, WifiOff } from "lucide-react-native";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Alert,
   Dimensions,
@@ -34,6 +34,11 @@ const gap = 12;
 const pad = 16;
 const colW = (Dimensions.get("window").width - pad * 2 - gap) / 2;
 
+function getMasonryAspect(seed: number) {
+  const normalized = Math.abs(Math.sin(seed || 1));
+  return 0.78 + normalized * 0.45;
+}
+
 export function CollectionsScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
@@ -46,6 +51,23 @@ export function CollectionsScreen() {
   const [newPhoto, setNewPhoto] = useState("");
 
   const totalItems = collectionsList.reduce((s, c) => s + c.itemCount, 0);
+  const gridColumns = useMemo(() => {
+    const left: typeof collectionsList = [];
+    const right: typeof collectionsList = [];
+    let leftScore = 0;
+    let rightScore = 0;
+    collectionsList.forEach((c, index) => {
+      const score = getMasonryAspect(Number(c.id) || index + 1);
+      if (leftScore <= rightScore) {
+        left.push(c);
+        leftScore += score;
+      } else {
+        right.push(c);
+        rightScore += score;
+      }
+    });
+    return [left, right] as const;
+  }, [collectionsList]);
 
   const submitNewCollection = async () => {
     if (!canInteract) {
@@ -113,9 +135,9 @@ export function CollectionsScreen() {
       <View style={[styles.stickyHeader, { paddingTop: insets.top + 8 }]}>
         <View style={styles.headerTop}>
           <View>
-            <Text style={styles.h1}>Мои коллекции</Text>
+            <Text style={styles.h1}>Collections</Text>
             <Text style={styles.sub}>
-              {collectionsList.length} коллекций • {totalItems} предметов
+              {collectionsList.length} collections • {totalItems} items
             </Text>
           </View>
           <View style={styles.toggleRow}>
@@ -124,7 +146,7 @@ export function CollectionsScreen() {
               style={[styles.toggleBtn, viewMode === "grid" ? styles.toggleOn : styles.toggleOff]}
             >
               <Grid3x3
-                size={20}
+                size={18}
                 color={viewMode === "grid" ? theme.primaryForeground : theme.mutedForeground}
               />
             </TouchableOpacity>
@@ -133,7 +155,7 @@ export function CollectionsScreen() {
               style={[styles.toggleBtn, viewMode === "list" ? styles.toggleOn : styles.toggleOff]}
             >
               <List
-                size={20}
+                size={18}
                 color={viewMode === "list" ? theme.primaryForeground : theme.mutedForeground}
               />
             </TouchableOpacity>
@@ -147,15 +169,23 @@ export function CollectionsScreen() {
       >
         {isLoadingCollections ? (
           viewMode === "grid" ? (
-            <View style={styles.grid}>
-              {[0, 1, 2, 3].map((i) => (
-                <View key={i} style={[styles.gridCard, { width: colW }]}>
-                  <Skeleton style={{ width: "100%", aspectRatio: 1, borderRadius: 0 }} radius={0} />
-                  <View style={styles.gridMeta}>
-                    <Skeleton style={{ height: 14, width: "75%", marginBottom: 10 }} />
-                    <Skeleton style={{ height: 10, width: "55%", marginBottom: 10 }} />
-                    <Skeleton style={{ height: 12, width: "40%" }} />
-                  </View>
+            <View style={styles.masonry}>
+              {[0, 1].map((colIdx) => (
+                <View key={colIdx} style={styles.masonryCol}>
+                  {[0, 1].map((rowIdx) => {
+                    const i = colIdx * 2 + rowIdx;
+                    const aspect = getMasonryAspect(i + 1);
+                    return (
+                      <View key={i} style={[styles.gridCard, { width: colW }]}>
+                        <Skeleton style={{ width: "100%", aspectRatio: aspect, borderRadius: 0 }} radius={0} />
+                        <View style={styles.gridMeta}>
+                          <Skeleton style={{ height: 14, width: "75%", marginBottom: 10 }} />
+                          <Skeleton style={{ height: 10, width: "55%", marginBottom: 10 }} />
+                          <Skeleton style={{ height: 12, width: "40%" }} />
+                        </View>
+                      </View>
+                    );
+                  })}
                 </View>
               ))}
             </View>
@@ -174,25 +204,29 @@ export function CollectionsScreen() {
             </View>
           )
         ) : viewMode === "grid" ? (
-          <View style={styles.grid}>
-            {collectionsList.map((c) => (
-              <TouchableOpacity
-                key={c.id}
-                style={[styles.gridCard, { width: colW }]}
-                onPress={() => navigation.navigate("CollectionDetail", { id: String(c.id) })}
-                activeOpacity={0.9}
-              >
-                <View style={styles.gridImageWrap}>
-                  <ImageWithFallback uri={c.imageUrl} style={styles.gridImage} borderRadius={0} />
-                </View>
-                <View style={styles.gridMeta}>
-                  <Text style={styles.cardTitle} numberOfLines={1}>
-                    {c.name}
-                  </Text>
-                  <Text style={styles.cardSub}>{c.itemCount} предметов</Text>
-                  <Text style={styles.cardPrice}>{formatMoney(c.totalValue)}</Text>
-                </View>
-              </TouchableOpacity>
+          <View style={styles.masonry}>
+            {gridColumns.map((column, colIndex) => (
+              <View key={`masonry-col-${colIndex}`} style={styles.masonryCol}>
+                {column.map((c, idx) => (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[styles.gridCard, { width: colW }]}
+                    onPress={() => navigation.navigate("CollectionDetail", { id: String(c.id) })}
+                    activeOpacity={0.9}
+                  >
+                    <View style={[styles.gridImageWrap, { aspectRatio: getMasonryAspect(Number(c.id) || idx + 1) }]}>
+                      <ImageWithFallback uri={c.imageUrl} style={styles.gridImage} borderRadius={0} />
+                    </View>
+                    <View style={styles.gridMeta}>
+                      <Text style={styles.cardTitle} numberOfLines={1}>
+                        {c.name}
+                      </Text>
+                      <Text style={styles.cardSub}>{c.itemCount} items</Text>
+                      <Text style={styles.cardPrice}>{formatMoney(c.totalValue)}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
             ))}
           </View>
         ) : (
@@ -211,7 +245,7 @@ export function CollectionsScreen() {
                   <Text style={styles.cardTitle} numberOfLines={1}>
                     {c.name}
                   </Text>
-                  <Text style={styles.cardSub}>{c.itemCount} предметов</Text>
+                  <Text style={styles.cardSub}>{c.itemCount} items</Text>
                   <Text style={styles.cardPrice}>{formatMoney(c.totalValue)}</Text>
                 </View>
               </TouchableOpacity>
@@ -219,35 +253,26 @@ export function CollectionsScreen() {
           </View>
         )}
 
-        <TouchableOpacity
-          style={[
-            styles.addBtn,
-            (isOffline || !canInteract) && styles.addBtnDisabled,
-          ]}
-          disabled={isOffline}
-          activeOpacity={0.9}
-          onPress={() => {
-            if (!canInteract) {
-              Alert.alert("Нужен вход", "Создайте аккаунт или войдите, чтобы добавить коллекцию.");
-              return;
-            }
-            setCreateOpen(true);
-          }}
-        >
-          {isOffline ? (
-            <>
-              <WifiOff size={20} color={theme.primaryForeground} style={{ marginRight: 8 }} />
-              <Text style={styles.addBtnText}>Офлайн — нельзя добавить</Text>
-            </>
-          ) : (
-            <>
-              <Plus size={20} color={theme.primaryForeground} style={{ marginRight: 8 }} />
-              <Text style={styles.addBtnText}>
-                {canInteract ? "Новая коллекция" : "Новая коллекция (вход)"}
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
+        {canInteract ? (
+          <TouchableOpacity
+            style={[styles.addBtn, isOffline && styles.addBtnDisabled]}
+            disabled={isOffline}
+            activeOpacity={0.9}
+            onPress={() => setCreateOpen(true)}
+          >
+            {isOffline ? (
+              <>
+                <WifiOff size={20} color={theme.primaryForeground} style={{ marginRight: 8 }} />
+                <Text style={styles.addBtnText}>Offline</Text>
+              </>
+            ) : (
+              <>
+                <Plus size={20} color={theme.primaryForeground} style={{ marginRight: 8 }} />
+                <Text style={styles.addBtnText}>New Collection</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        ) : null}
       </TabAwareScrollView>
 
       <Modal visible={createOpen} animationType="fade" transparent>
@@ -340,32 +365,45 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   h1: { fontSize: 20, fontWeight: "600", color: theme.foreground },
-  sub: { fontSize: 14, color: theme.mutedForeground, marginTop: 4 },
+  sub: { fontSize: 14, color: theme.mutedForeground, marginTop: 4, opacity: 0.95 },
   toggleRow: { flexDirection: "row", gap: 8 },
   toggleBtn: {
-    padding: 10,
-    borderRadius: theme.radiusLg,
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  toggleOn: { backgroundColor: theme.primary },
-  toggleOff: { backgroundColor: theme.card },
+  toggleOn: { backgroundColor: theme.primary, borderColor: theme.primary },
+  toggleOff: { backgroundColor: theme.card, borderColor: theme.border },
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 12,
   },
+  masonry: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+  },
+  masonryCol: {
+    width: colW,
+    gap: 12,
+  },
   gridCard: {
     backgroundColor: theme.card,
-    borderRadius: theme.radiusXl,
+    borderRadius: 22,
     overflow: "hidden",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.border,
   },
-  gridImageWrap: { aspectRatio: 1, width: "100%", overflow: "hidden" },
+  gridImageWrap: { width: "100%", overflow: "hidden" },
   gridImage: { width: "100%", height: "100%" },
-  gridMeta: { padding: 12 },
-  cardTitle: { fontSize: 14, fontWeight: "600", color: theme.foreground, marginBottom: 4 },
-  cardSub: { fontSize: 12, color: theme.mutedForeground },
-  cardPrice: { fontSize: 12, color: theme.primary, marginTop: 4, fontWeight: "600" },
+  gridMeta: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 14 },
+  cardTitle: { fontSize: 32 / 2, fontWeight: "500", color: theme.foreground, marginBottom: 4 },
+  cardSub: { fontSize: 14 / 1.2, color: theme.mutedForeground },
+  cardPrice: { fontSize: 28 / 2, color: theme.primary, marginTop: 6, fontWeight: "500" },
   listCard: {
     flexDirection: "row",
     gap: 12,

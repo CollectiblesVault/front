@@ -31,6 +31,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomNav } from "../components/BottomNav";
 import { ImageWithFallback } from "../components/ImageWithFallback";
 import { TabAwareScrollView } from "../components/TabAwareScrollView";
+import { getPublicCollectionItemsApi } from "../api/vaultApi";
 import { useAppSettings } from "../context/app-settings-context";
 import { useCollectionsStore } from "../context/collections-store-context";
 import { useWishlist } from "../context/wishlist-context";
@@ -60,8 +61,69 @@ export function CollectionDetailScreen() {
   const { isInWishlist, toggleWishlist } = useWishlist();
 
   const browse = route.params.browse === true;
+  const previewItems = route.params.itemsPreview ?? [];
+  const [browseLoadedItems, setBrowseLoadedItems] = useState<
+    Array<{
+      id: number;
+      name: string;
+      category: string;
+      price: number;
+      description: string;
+      imageUrl: string;
+      isWishlisted: boolean;
+    }>
+  >([]);
+  const collectionItems = useMemo(() => {
+    if (browse && previewItems.length > 0) {
+      return previewItems.map((item) => ({
+        id: Number(item.id),
+        name: String(item.name),
+        category: String(item.category ?? "—"),
+        price: Number(item.price ?? 0) || 0,
+        description: String(item.description ?? ""),
+        imageUrl: String(item.imageUrl ?? ""),
+        isWishlisted: false,
+      }));
+    }
+    if (browse && browseLoadedItems.length > 0) {
+      return browseLoadedItems;
+    }
+    return itemsForCollection(route.params.id);
+  }, [browse, browseLoadedItems, itemsForCollection, previewItems, route.params.id]);
 
-  const collectionItems = itemsForCollection(route.params.id);
+  useEffect(() => {
+    let cancelled = false;
+    if (!browse || previewItems.length > 0) return;
+    const collectionId = Number(route.params.id);
+    if (!Number.isFinite(collectionId)) return;
+    (async () => {
+      try {
+        const items = await getPublicCollectionItemsApi({ collectionId });
+        if (cancelled) return;
+        const normalized = (items ?? [])
+          .map((item: any) => {
+            const id = Number(item?.id ?? item?.item_id);
+            if (!Number.isFinite(id)) return null;
+            return {
+              id,
+              name: String(item?.name ?? `Предмет ${id}`),
+              category: String(item?.category_name ?? item?.category ?? "—"),
+              price: Number(item?.price ?? 0) || 0,
+              description: String(item?.description ?? ""),
+              imageUrl: String(item?.image_url ?? item?.image ?? ""),
+              isWishlisted: false,
+            };
+          })
+          .filter(Boolean) as typeof browseLoadedItems;
+        setBrowseLoadedItems(normalized);
+      } catch {
+        if (!cancelled) setBrowseLoadedItems([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [browse, previewItems.length, route.params.id]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [collectionEditOpen, setCollectionEditOpen] = useState(false);
@@ -80,8 +142,9 @@ export function CollectionDetailScreen() {
   });
 
   useEffect(() => {
-    setDisplayName(collectionTitle(route.params.id));
-  }, [route.params.id, itemsForCollection, collectionTitle]);
+    const fromRoute = route.params.collectionPreview?.name;
+    setDisplayName(fromRoute?.trim() ? fromRoute : collectionTitle(route.params.id));
+  }, [route.params.collectionPreview?.name, route.params.id, collectionTitle]);
 
   const collectionName = displayName;
 
@@ -107,6 +170,7 @@ export function CollectionDetailScreen() {
   );
 
   const openCollectionEdit = useCallback(() => {
+    if (browse) return;
     requireAuth(() => {
       setCollectionNameDraft(displayName);
       setCollectionImageDraft(collectionImage(route.params.id));
@@ -116,6 +180,7 @@ export function CollectionDetailScreen() {
   }, [displayName, collectionImage, collectionIsPublic, route.params.id, requireAuth]);
 
   const saveCollectionEdit = useCallback(async () => {
+    if (browse) return;
     const t = collectionNameDraft.trim();
     const img = collectionImageDraft.trim();
     if (t.length > 0) {
@@ -136,6 +201,7 @@ export function CollectionDetailScreen() {
   ]);
 
   const openNewItem = useCallback(() => {
+    if (browse) return;
     requireAuth(() => {
       setNewItemDraft({
         name: "",
@@ -146,7 +212,7 @@ export function CollectionDetailScreen() {
       });
       setNewItemOpen(true);
     });
-  }, [requireAuth]);
+  }, [browse, requireAuth]);
 
   const pickNewItemPhoto = useCallback(
     async (source: "camera" | "library") => {
@@ -308,6 +374,14 @@ export function CollectionDetailScreen() {
                     id: String(item.id),
                     browse,
                     collectionId: route.params.id,
+                    itemPreview: {
+                      id: item.id,
+                      name: item.name,
+                      category: item.category,
+                      price: item.price,
+                      description: item.description,
+                      imageUrl: item.imageUrl,
+                    },
                   })
                 }
                 activeOpacity={0.92}

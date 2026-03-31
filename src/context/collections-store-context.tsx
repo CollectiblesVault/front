@@ -15,6 +15,8 @@ import {
 } from "../api/vaultApi";
 import { useAppSettings } from "./app-settings-context";
 
+const COLLECTIONS_CACHE_FILE = "collections-cache.v1.json";
+
 export interface CollectionRow {
   id: number;
   name: string;
@@ -135,6 +137,60 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
 
   const lastAuthRef = useRef<string | null>(null);
 
+  const readCache = useCallback(async () => {
+    if (!authToken) return false;
+    try {
+      const FileSystem = await import("expo-file-system/legacy");
+      const baseDir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory;
+      if (!baseDir) return false;
+      const path = `${baseDir}${COLLECTIONS_CACHE_FILE}`;
+      const info = await FileSystem.getInfoAsync(path);
+      if (!info.exists) return false;
+      const raw = await FileSystem.readAsStringAsync(path);
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return false;
+      if (!Array.isArray(parsed.collections) || typeof parsed.itemsMap !== "object" || typeof parsed.categoriesById !== "object") {
+        return false;
+      }
+      setCollections(parsed.collections);
+      setItemsMap(parsed.itemsMap);
+      setCategoriesById(parsed.categoriesById);
+      setCollectionsError(null);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [authToken]);
+
+  const writeCache = useCallback(
+    async (payload: { collections: any[]; itemsMap: Record<string, CollectionItemRow[]>; categoriesById: Record<number, { id: number; name: string }> }) => {
+      if (!authToken) return;
+      try {
+        const FileSystem = await import("expo-file-system/legacy");
+        const baseDir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory;
+        if (!baseDir) return;
+        const path = `${baseDir}${COLLECTIONS_CACHE_FILE}`;
+        await FileSystem.writeAsStringAsync(
+          path,
+          JSON.stringify(
+            {
+              savedAt: new Date().toISOString(),
+              collections: payload.collections,
+              itemsMap: payload.itemsMap,
+              categoriesById: payload.categoriesById,
+            },
+            null,
+            0,
+          ),
+          { encoding: FileSystem.EncodingType.UTF8 },
+        );
+      } catch {
+        // ignore cache write errors
+      }
+    },
+    [authToken],
+  );
+
   const refreshCollections = useCallback(async () => {
     if (!authToken) {
       setCollections([]);
@@ -188,6 +244,7 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
       }
       setItemsMap(byCollection);
       setCollections(nextCollections);
+      void writeCache({ collections: nextCollections, itemsMap: byCollection, categoriesById: nextCategoriesById });
     } catch (e: any) {
       const message = e?.message ? String(e.message) : "Не удалось загрузить коллекции.";
       // Expired/invalid token should not block UI with hard error on collections screen.
@@ -196,19 +253,33 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
         setItemsMap({});
         setCollectionsError(null);
       } else {
+        // If offline/network error: keep last in-memory data; if empty, try to load cache.
+        if (
+          (message.toLowerCase().includes("network") ||
+            message.toLowerCase().includes("failed to fetch") ||
+            message.toLowerCase().includes("timeout")) &&
+          collections.length === 0
+        ) {
+          await readCache();
+          setCollectionsError(null);
+        } else {
+          setCollectionsError(message);
+        }
+      } else {
         setCollectionsError(message);
       }
     } finally {
       setIsLoadingCollections(false);
     }
-  }, [authToken]);
+  }, [authToken, collections.length, readCache, writeCache]);
 
   useEffect(() => {
     if (lastAuthRef.current !== authToken) {
       lastAuthRef.current = authToken;
+      void readCache();
       refreshCollections();
     }
-  }, [authToken, refreshCollections]);
+  }, [authToken, readCache, refreshCollections]);
 
   const collectionsList = useMemo<CollectionRow[]>(() => {
     return collections.map((c) => {

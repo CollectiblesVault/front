@@ -1,11 +1,10 @@
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { Animated, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { FolderOpen, Gavel, Heart, Home, TrendingUp, Users } from "lucide-react-native";
 
 import { useTabTransition } from "../context/tab-transition-context";
-import { useOptionalTabBarScroll } from "../context/tab-bar-scroll-context";
 import type { RootStackParamList } from "../navigation/types";
 import { theme } from "../theme";
 
@@ -59,7 +58,7 @@ function goTab(navigation: Nav, key: keyof RootStackParamList) {
 const items: { key: keyof RootStackParamList; label: string; icon: typeof Home }[] = [
   { key: "Home", label: "Главная", icon: Home },
   { key: "Collections", label: "Мои", icon: FolderOpen },
-  { key: "Community", label: "Люди", icon: Users },
+  { key: "Community", label: "Публичные", icon: Users },
   { key: "Auction", label: "Аукцион", icon: Gavel },
   { key: "Wishlist", label: "Желания", icon: Heart },
   { key: "Reports", label: "Отчёты", icon: TrendingUp },
@@ -71,19 +70,14 @@ export function BottomNav() {
   const navigation = useNavigation<Nav>();
   const route = useRoute();
   const routeName = route.name as keyof RootStackParamList;
-  const tab = useOptionalTabBarScroll();
   const { beginTabSwitch } = useTabTransition();
 
   if (HIDE_ROUTES.includes(routeName)) {
     return null;
   }
 
-  const BarWrapper = Platform.OS === "android" && tab ? Animated.View : View;
-  const barExtraStyle =
-    Platform.OS === "android" && tab ? { transform: [{ translateY: tab.translateY }] } : undefined;
-
   return (
-    <BarWrapper style={[styles.bar, barExtraStyle]}>
+    <View style={styles.bar}>
       <View style={styles.row}>
         {items.map((item) => {
           const Icon = item.icon;
@@ -106,7 +100,7 @@ export function BottomNav() {
           );
         })}
       </View>
-    </BarWrapper>
+    </View>
   );
 }
 

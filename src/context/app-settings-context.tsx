@@ -4,6 +4,7 @@ import {
   type CurrencyCode,
   formatCurrency,
   formatCurrencyThousands,
+  refreshCurrencyRates,
 } from "../utils/formatMoney";
 import { persistGet, persistSet } from "../utils/persist";
 import { meApi } from "../api/vaultApi";
@@ -11,6 +12,7 @@ import { meApi } from "../api/vaultApi";
 export interface UserProfile {
   email: string;
   displayName: string;
+  avatarUrl?: string;
 }
 
 interface AppSettingsValue {
@@ -31,8 +33,14 @@ interface AppSettingsValue {
 
 const AppSettingsContext = createContext<AppSettingsValue | null>(null);
 
+function buildAvatarFallback(displayName: string, email: string) {
+  const seed = encodeURIComponent((displayName || email || "User").trim());
+  return `https://ui-avatars.com/api/?name=${seed}&background=1A1A1A&color=FFFFFF&size=256`;
+}
+
 export function AppSettingsProvider({ children }: { children: ReactNode }) {
   const [currency, setCurrency] = useState<CurrencyCode>("USD");
+  const [, setRatesVersion] = useState(0);
   const [hideFromSearch, setHideFromSearch] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
@@ -68,8 +76,9 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
             const parsed = JSON.parse(profileRaw);
             const email = typeof parsed?.email === "string" ? parsed.email : "";
             const displayName = typeof parsed?.displayName === "string" ? parsed.displayName : "";
+            const avatarUrl = typeof parsed?.avatarUrl === "string" ? parsed.avatarUrl : "";
             if (email || displayName) {
-              setUserProfile({ email, displayName });
+              setUserProfile({ email, displayName, avatarUrl: avatarUrl || buildAvatarFallback(displayName, email) });
             }
           } catch {
             // ignore
@@ -88,8 +97,19 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
                 : typeof me?.displayName === "string"
                   ? me.displayName
                   : "";
+            const avatarUrl =
+              typeof me?.avatar_url === "string"
+                ? me.avatar_url
+                : typeof me?.avatarUrl === "string"
+                  ? me.avatarUrl
+                  : "";
             if (email || displayName) {
-              const profile = { email, displayName: displayName || email || "Пользователь" };
+              const resolvedName = displayName || email || "Пользователь";
+              const profile = {
+                email,
+                displayName: resolvedName,
+                avatarUrl: avatarUrl || buildAvatarFallback(resolvedName, email),
+              };
               setUserProfile(profile);
               await persistSet("userProfile", JSON.stringify(profile));
             }
@@ -120,6 +140,24 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     if (!didHydrateRef.current) return;
     void persistSet("userProfile", userProfile ? JSON.stringify(userProfile) : null);
   }, [userProfile]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      await refreshCurrencyRates();
+      if (cancelled) return;
+      // Force rerender so formatters use latest rates.
+      setRatesVersion((v) => v + 1);
+    };
+    void run();
+    const timer = setInterval(() => {
+      void run();
+    }, 30 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   const formatMoney = useCallback(
     (amountUsd: number) => formatCurrency(amountUsd, currency),

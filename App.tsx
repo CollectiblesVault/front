@@ -1,4 +1,7 @@
+import * as NavigationBar from "expo-navigation-bar";
 import { StatusBar } from "expo-status-bar";
+import { useEffect } from "react";
+import { Platform } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AppSettingsProvider } from "./src/context/app-settings-context";
@@ -9,6 +12,14 @@ import { WishlistProvider } from "./src/context/wishlist-context";
 import { RootNavigator } from "./src/navigation/RootNavigator";
 
 export default function App() {
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    void (async () => {
+      await NavigationBar.setBehaviorAsync("overlay-swipe");
+      await NavigationBar.setVisibilityAsync("hidden");
+    })();
+  }, []);
+
   return (
     <SafeAreaProvider>
       <AppSettingsProvider>
@@ -16,7 +27,7 @@ export default function App() {
           <WishlistProvider>
           <TabBarScrollProvider>
               <TabTransitionProvider>
-                <StatusBar style="light" translucent backgroundColor="transparent" />
+                <StatusBar hidden style="light" translucent backgroundColor="transparent" />
             <RootNavigator />
               </TabTransitionProvider>
           </TabBarScrollProvider>
