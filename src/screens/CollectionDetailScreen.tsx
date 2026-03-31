@@ -21,6 +21,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Switch,
   StyleSheet,
   Text,
   TextInput,
@@ -54,6 +55,8 @@ export function CollectionDetailScreen() {
     collectionTitle,
     collectionImage,
     updateCollection,
+    collectionIsPublic,
+    setCollectionVisibility,
     addItemToCollection,
     mergedItemDetail,
   } = useCollectionsStore();
@@ -70,6 +73,7 @@ export function CollectionDetailScreen() {
   const [displayName, setDisplayName] = useState(() => collectionTitle(route.params.id));
   const [collectionNameDraft, setCollectionNameDraft] = useState("");
   const [collectionImageDraft, setCollectionImageDraft] = useState("");
+  const [collectionPublicDraft, setCollectionPublicDraft] = useState(false);
   const [newItemDraft, setNewItemDraft] = useState({
     name: "",
     category: "",
@@ -111,21 +115,30 @@ export function CollectionDetailScreen() {
     requireAuth(() => {
       setCollectionNameDraft(displayName);
       setCollectionImageDraft(collectionImage(route.params.id));
+      setCollectionPublicDraft(collectionIsPublic(route.params.id));
       setCollectionEditOpen(true);
     });
-  }, [displayName, collectionImage, route.params.id, requireAuth]);
+  }, [displayName, collectionImage, collectionIsPublic, route.params.id, requireAuth]);
 
-  const saveCollectionEdit = useCallback(() => {
+  const saveCollectionEdit = useCallback(async () => {
     const t = collectionNameDraft.trim();
     const img = collectionImageDraft.trim();
     if (t.length > 0) {
-      updateCollection(route.params.id, { name: t, ...(img.length > 0 ? { image: img } : {}) });
+      await updateCollection(route.params.id, { name: t, ...(img.length > 0 ? { image: img } : {}) });
       setDisplayName(t);
     } else if (img.length > 0) {
-      updateCollection(route.params.id, { image: img });
+      await updateCollection(route.params.id, { image: img });
     }
+    await setCollectionVisibility(route.params.id, collectionPublicDraft);
     setCollectionEditOpen(false);
-  }, [collectionNameDraft, collectionImageDraft, updateCollection, route.params.id]);
+  }, [
+    collectionNameDraft,
+    collectionImageDraft,
+    updateCollection,
+    setCollectionVisibility,
+    collectionPublicDraft,
+    route.params.id,
+  ]);
 
   const openNewItem = useCallback(() => {
     requireAuth(() => {
@@ -385,6 +398,15 @@ export function CollectionDetailScreen() {
                     placeholderTextColor={theme.mutedForeground}
                     style={styles.editInput}
                   />
+                  <View style={styles.publicRow}>
+                    <Text style={styles.publicLabel}>Публичная коллекция</Text>
+                    <Switch
+                      value={collectionPublicDraft}
+                      onValueChange={setCollectionPublicDraft}
+                      trackColor={{ false: theme.border, true: theme.primary }}
+                      thumbColor={collectionPublicDraft ? theme.primaryForeground : theme.mutedForeground}
+                    />
+                  </View>
                   <Text style={styles.fieldHint}>Обложка (URL фото)</Text>
                   <TextInput
                     value={collectionImageDraft}
@@ -404,7 +426,7 @@ export function CollectionDetailScreen() {
                     <TouchableOpacity style={styles.editCancel} onPress={() => setCollectionEditOpen(false)} activeOpacity={0.88}>
                       <Text style={styles.editCancelText}>Отмена</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.editSave} onPress={saveCollectionEdit} activeOpacity={0.88}>
+                    <TouchableOpacity style={styles.editSave} onPress={() => void saveCollectionEdit()} activeOpacity={0.88}>
                       <Text style={styles.editSaveText}>Сохранить</Text>
                     </TouchableOpacity>
                   </View>
@@ -754,6 +776,14 @@ const styles = StyleSheet.create({
   },
   editSheetTall: { maxWidth: 440 },
   fieldHint: { fontSize: 12, color: theme.mutedForeground, marginBottom: 6 },
+  publicRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+    gap: 12,
+  },
+  publicLabel: { fontSize: 13, fontWeight: "600", color: theme.foreground },
   previewWrap: { marginBottom: 12, borderRadius: 12, overflow: "hidden", maxHeight: 160 },
   previewImg: { width: "100%", height: 140 },
   photoPreviewWrap: { marginBottom: 12, borderRadius: 12, overflow: "hidden", maxHeight: 160, position: "relative" as const },

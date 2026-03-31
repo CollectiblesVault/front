@@ -153,6 +153,54 @@ export async function reportsSummaryApi({
   });
 }
 
+export async function reportsCollectionsApi({
+  token,
+  fromDate,
+  toDate,
+}: {
+  token?: string | null;
+  fromDate: string; // ISO
+  toDate: string;   // ISO
+}) {
+  return apiRequest<any[]>({
+    method: "GET",
+    path: "/api/reports/collections",
+    query: { fromDate, toDate },
+    token,
+  });
+}
+
+export async function reportsItemsApi({
+  token,
+  fromDate,
+  toDate,
+}: {
+  token?: string | null;
+  fromDate: string; // ISO
+  toDate: string;   // ISO
+}) {
+  return apiRequest<any[]>({
+    method: "GET",
+    path: "/api/reports/items",
+    query: { fromDate, toDate },
+    token,
+  });
+}
+
+export async function reportsActivityApi({
+  token,
+  period,
+}: {
+  token?: string | null;
+  period: "week" | "month" | "year";
+}) {
+  return apiRequest<any>({
+    method: "GET",
+    path: "/api/reports/activity",
+    query: { period },
+    token,
+  });
+}
 export async function getPublicUsersApi({
   limit,
   offset,

@@ -11,6 +11,7 @@ import {
   getItemsApi,
   updateCollectionApi,
   updateItemApi,
+  setCollectionVisibilityApi,
 } from "../api/vaultApi";
 import { useAppSettings } from "./app-settings-context";
 
@@ -20,6 +21,7 @@ export interface CollectionRow {
   itemCount: number;
   totalValue: number;
   image: string;
+  isPublic: boolean;
 }
 
 export interface CollectionItemRow {
@@ -66,12 +68,13 @@ function safeNumber(v: any, fallback = 0): number {
   return fallback;
 }
 
-function normalizeCollection(raw: any): { id: number; name: string; description?: string | null } | null {
+function normalizeCollection(raw: any): { id: number; name: string; description?: string | null; isPublic: boolean } | null {
   const id = safeNumber(raw?.id ?? raw?.collection_id, NaN);
   if (!Number.isFinite(id)) return null;
   const name = safeString(raw?.name, "").trim() || `Коллекция ${id}`;
   const description = raw?.description != null ? safeString(raw.description, "") : undefined;
-  return { id, name, description };
+  const isPublic = Boolean(raw?.is_public ?? raw?.isPublic ?? false);
+  return { id, name, description, isPublic };
 }
 
 function normalizeItem(raw: any): {
@@ -116,6 +119,7 @@ interface CollectionsStoreValue {
   itemsForCollection: (collectionId: string) => CollectionItemRow[];
   collectionTitle: (collectionId: string | undefined) => string;
   collectionImage: (collectionId: string | undefined) => string;
+  collectionIsPublic: (collectionId: string | undefined) => boolean;
   isLoadingCollections: boolean;
   collectionsError: string | null;
   isLoadingItemsForCollection: (collectionId: string) => boolean;
@@ -123,6 +127,7 @@ interface CollectionsStoreValue {
   addCollection: (name: string, _image?: string) => Promise<number | null>;
   updateCollection: (collectionId: string, patch: { name?: string; image?: string }) => Promise<void>;
   deleteCollection: (collectionId: string) => Promise<void>;
+  setCollectionVisibility: (collectionId: string, isPublic: boolean) => Promise<void>;
   renameCollection: (collectionId: string, name: string) => void;
   addItemToCollection: (
     collectionId: string,
@@ -143,7 +148,7 @@ const CollectionsStoreContext = createContext<CollectionsStoreValue | null>(null
 export function CollectionsStoreProvider({ children }: { children: ReactNode }) {
   const { authToken } = useAppSettings();
 
-  const [collections, setCollections] = useState<{ id: number; name: string; description?: string | null }[]>([]);
+  const [collections, setCollections] = useState<{ id: number; name: string; description?: string | null; isPublic: boolean }[]>([]);
   const [itemsMap, setItemsMap] = useState<Record<string, CollectionItemRow[]>>({});
   const [categoriesById, setCategoriesById] = useState<Record<number, { id: number; name: string }>>({});
 
@@ -172,7 +177,7 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
 
       const nextCollections = (rawCollections ?? [])
         .map(normalizeCollection)
-        .filter(Boolean) as { id: number; name: string; description?: string | null }[];
+        .filter(Boolean) as { id: number; name: string; description?: string | null; isPublic: boolean }[];
 
       const nextCategoriesById: Record<number, { id: number; name: string }> = {};
       for (const c of rawCategories ?? []) {
@@ -238,8 +243,9 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
         itemCount: items.length,
         totalValue: items.reduce((s, i) => s + i.price, 0),
         image: DEFAULT_COLLECTION_IMAGE(c.id),
+        isPublic: c.isPublic,
       };
-    });
+      });
   }, [collections, itemsMap]);
 
   const itemsForCollection = useCallback(
@@ -266,6 +272,15 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
       const n = Number(collectionId);
       const c = collectionsList.find((x) => x.id === n);
       return c?.image ?? DEFAULT_COLLECTION_IMAGE(n || 0);
+    },
+    [collectionsList],
+  );
+
+  const collectionIsPublic = useCallback(
+    (collectionId: string | undefined) => {
+      const n = Number(collectionId);
+      const c = collectionsList.find((x) => x.id === n);
+      return c?.isPublic ?? false;
     },
     [collectionsList],
   );
@@ -320,6 +335,17 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
     [authToken, refreshCollections],
   );
 
+  const setCollectionVisibility = useCallback(
+    async (collectionId: string, isPublic: boolean) => {
+      if (!authToken) return;
+      const id = Number(collectionId);
+      if (!Number.isFinite(id)) return;
+      await setCollectionVisibilityApi({ token: authToken, collectionId: id, is_public: isPublic });
+      await refreshCollections();
+    },
+    [authToken, refreshCollections],
+  );
+
   const renameCollection = useCallback(
     (collectionId: string, name: string) => {
       void updateCollection(collectionId, { name });
@@ -364,7 +390,7 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
         collection_id: cid,
         category_id: categoryId,
         name,
-        price: row.price,
+          price: row.price,
         image_url: row.image?.trim() ? row.image.trim() : null,
         description: row.description?.trim() ? row.description.trim() : null,
       });
@@ -442,6 +468,7 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
       itemsForCollection,
       collectionTitle,
       collectionImage,
+      collectionIsPublic,
       isLoadingCollections,
       collectionsError,
       isLoadingItemsForCollection,
@@ -449,6 +476,7 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
       addCollection,
       updateCollection,
       deleteCollection,
+      setCollectionVisibility,
       renameCollection,
       addItemToCollection,
       updateItemInCollection,
@@ -461,6 +489,7 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
       itemsForCollection,
       collectionTitle,
       collectionImage,
+      collectionIsPublic,
       isLoadingCollections,
       collectionsError,
       isLoadingItemsForCollection,
@@ -468,6 +497,7 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
       addCollection,
       updateCollection,
       deleteCollection,
+      setCollectionVisibility,
       renameCollection,
       addItemToCollection,
       updateItemInCollection,
