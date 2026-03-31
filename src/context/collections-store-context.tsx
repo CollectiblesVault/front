@@ -265,8 +265,6 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
         } else {
           setCollectionsError(message);
         }
-      } else {
-        setCollectionsError(message);
       }
     } finally {
       setIsLoadingCollections(false);
