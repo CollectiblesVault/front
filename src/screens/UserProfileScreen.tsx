@@ -15,6 +15,7 @@ import { useCollectionsStore } from "../context/collections-store-context";
 import { useWishlist } from "../context/wishlist-context";
 import {
   createItemCommentApi,
+  getItemLikeStatusApi,
   getPublicCollectionItemsApi,
   getPublicUserApi,
   getUserCollectionsApi,
@@ -46,6 +47,7 @@ export function UserProfileScreen() {
   const load = async () => {
     setIsLoading(true);
     setError(null);
+    setLikedByItemId({});
     try {
       const userIdNum = Number(route.params.userId);
       const [u, cols] = await Promise.all([
@@ -66,6 +68,29 @@ export function UserProfileScreen() {
         }),
       );
       setItemsByCollection(Object.fromEntries(pairs));
+
+      const itemIds = new Set<number>();
+      for (const [, items] of pairs) {
+        for (const item of items ?? []) {
+          const id = Number((item as any)?.id ?? (item as any)?.item_id);
+          if (Number.isFinite(id)) itemIds.add(id);
+        }
+      }
+      if (authToken && itemIds.size > 0) {
+        const likeEntries = await Promise.all(
+          [...itemIds].map(async (id) => {
+            try {
+              const s = await getItemLikeStatusApi({ token: authToken, itemId: id });
+              return [id, s.likedByMe] as const;
+            } catch {
+              return [id, false] as const;
+            }
+          }),
+        );
+        setLikedByItemId(Object.fromEntries(likeEntries));
+      } else {
+        setLikedByItemId({});
+      }
     } catch (e: any) {
       setError(e?.message ? String(e.message) : "Не удалось загрузить профиль.");
     } finally {
@@ -90,9 +115,14 @@ export function UserProfileScreen() {
         const next = !Boolean(likedByItemId[itemId]);
         setLikedByItemId((prev) => ({ ...prev, [itemId]: next }));
         if (!authToken) return;
-        void (next ? likeItemWithFallbackApi({ token: authToken, itemId }) : unlikeItemApi({ token: authToken, itemId })).catch(() => {
-          setLikedByItemId((prev) => ({ ...prev, [itemId]: !next }));
-        });
+        void (next ? likeItemWithFallbackApi({ token: authToken, itemId }) : unlikeItemApi({ token: authToken, itemId }))
+          .then(() => getItemLikeStatusApi({ token: authToken, itemId }))
+          .then((s) => {
+            setLikedByItemId((prev) => ({ ...prev, [itemId]: s.likedByMe }));
+          })
+          .catch(() => {
+            setLikedByItemId((prev) => ({ ...prev, [itemId]: !next }));
+          });
       });
     },
     [authToken, likedByItemId, requireAuth],
@@ -159,7 +189,7 @@ export function UserProfileScreen() {
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.params.userId]);
+  }, [route.params.userId, authToken]);
 
   return (
     <View style={styles.root}>

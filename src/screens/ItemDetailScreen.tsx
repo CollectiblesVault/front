@@ -25,9 +25,16 @@ import { TabAwareScrollView } from "../components/TabAwareScrollView";
 import { useAppSettings } from "../context/app-settings-context";
 import { useCollectionsStore } from "../context/collections-store-context";
 import { useWishlist } from "../context/wishlist-context";
-import { createItemCommentApi, getItemCommentsApi, likeItemWithFallbackApi, unlikeItemApi } from "../api/vaultApi";
+import {
+  createItemCommentApi,
+  getItemCommentsApi,
+  getItemLikeStatusApi,
+  likeItemWithFallbackApi,
+  unlikeItemApi,
+} from "../api/vaultApi";
 import type { RootStackParamList } from "../navigation/types";
 import { theme } from "../theme";
+import { pickImageFromDevice, uploadImageFromLocalUri } from "../utils/pickAndUploadImage";
 import { pluralRu } from "../utils/pluralRu";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "ItemDetail">;
@@ -75,6 +82,7 @@ export function ItemDetailScreen() {
   const [isLoadingComments, setIsLoadingComments] = useState(true);
 
   const [editOpen, setEditOpen] = useState(false);
+  const [editImageUploading, setEditImageUploading] = useState(false);
   const [editDraft, setEditDraft] = useState({
     name: "",
     category: "",
@@ -112,6 +120,31 @@ export function ItemDetailScreen() {
     };
   }, [authToken, itemId]);
 
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!Number.isFinite(itemId)) {
+        setIsLiked(false);
+        setLikesCount(0);
+        return;
+      }
+      try {
+        const s = await getItemLikeStatusApi({ token: authToken, itemId });
+        if (!alive) return;
+        setIsLiked(s.likedByMe);
+        setLikesCount(s.likesCount);
+      } catch {
+        if (alive) {
+          setIsLiked(false);
+          setLikesCount(0);
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [authToken, itemId]);
+
   const inWishlist = base ? isInWishlist(base.id) : false;
 
   const likesLabel = useMemo(
@@ -144,6 +177,48 @@ export function ItemDetailScreen() {
     });
   }, [base, requireAuth]);
 
+  const runUploadEditItemPhoto = useCallback(
+    async (source: "camera" | "library") => {
+      if (!authToken) {
+        Alert.alert("Нужен вход", "Войдите в аккаунт, чтобы загрузить фото.");
+        return;
+      }
+      try {
+        const picked = await pickImageFromDevice(source);
+        if (!picked) return;
+        setEditImageUploading(true);
+        const url = await uploadImageFromLocalUri({
+          token: authToken,
+          uri: picked.uri,
+          fileName: picked.fileName,
+          mimeType: picked.mimeType,
+        });
+        setEditDraft((d) => ({ ...d, image: url }));
+      } catch (e: any) {
+        Alert.alert("Загрузка не удалась", e?.message ? String(e.message) : "Попробуйте ещё раз.");
+      } finally {
+        setEditImageUploading(false);
+      }
+    },
+    [authToken],
+  );
+
+  const openEditItemPhotoMenu = useCallback(() => {
+    if (Platform.OS === "web") {
+      Alert.alert("Web", "Вставьте ссылку на изображение в поле ниже.");
+      return;
+    }
+    if (!authToken) {
+      Alert.alert("Нужен вход", "Войдите в аккаунт, чтобы загрузить фото.");
+      return;
+    }
+    Alert.alert("Фото предмета", "Файл будет загружен на сервер", [
+      { text: "Камера", onPress: () => void runUploadEditItemPhoto("camera") },
+      { text: "Галерея", onPress: () => void runUploadEditItemPhoto("library") },
+      { text: "Отмена", style: "cancel" },
+    ]);
+  }, [authToken, runUploadEditItemPhoto]);
+
   const saveEdit = useCallback(() => {
     if (!base) return;
     const cid = collectionIdParam ?? findCollectionIdForItem(base.id);
@@ -154,6 +229,16 @@ export function ItemDetailScreen() {
     const price = Number.parseFloat(editDraft.price.replace(/\s/g, "").replace(",", "."));
     if (!editDraft.name.trim() || Number.isNaN(price)) {
       Alert.alert("Проверьте данные", "Укажите название и цену.");
+      return;
+    }
+    const imgDraft = editDraft.image.trim();
+    if (
+      imgDraft.startsWith("file:") ||
+      imgDraft.startsWith("content:") ||
+      imgDraft.startsWith("ph://") ||
+      imgDraft.startsWith("assets-library:")
+    ) {
+      Alert.alert("Фото не загружено", "Сначала загрузите снимок на сервер или укажите https-ссылку.");
       return;
     }
     updateItemInCollection(cid, base.id, {
@@ -173,11 +258,17 @@ export function ItemDetailScreen() {
       setLikesCount((prev) => Math.max(0, prev + (next ? 1 : -1)));
       if (!authToken) return;
       if (!Number.isFinite(itemId)) return;
-      void (next ? likeItemWithFallbackApi({ token: authToken, itemId }) : unlikeItemApi({ token: authToken, itemId })).catch(() => {
-        setIsLiked(!next);
-        setLikesCount((prev) => Math.max(0, prev + (next ? -1 : 1)));
-        Alert.alert("Лайк не поставлен", "Попробуйте ещё раз.");
-      });
+      void (next ? likeItemWithFallbackApi({ token: authToken, itemId }) : unlikeItemApi({ token: authToken, itemId }))
+        .then(() => getItemLikeStatusApi({ token: authToken, itemId }))
+        .then((s) => {
+          setIsLiked(s.likedByMe);
+          setLikesCount(s.likesCount);
+        })
+        .catch(() => {
+          setIsLiked(!next);
+          setLikesCount((prev) => Math.max(0, prev + (next ? -1 : 1)));
+          Alert.alert("Лайк не поставлен", "Попробуйте ещё раз.");
+        });
     });
   };
 
@@ -397,15 +488,34 @@ export function ItemDetailScreen() {
                     placeholderTextColor={theme.mutedForeground}
                     style={styles.editInput}
                   />
+                  <Text style={styles.editFieldHint}>Фото</Text>
+                  {Platform.OS !== "web" ? (
+                    <TouchableOpacity
+                      style={[styles.editPhotoBtn, editImageUploading && { opacity: 0.6 }]}
+                      onPress={openEditItemPhotoMenu}
+                      disabled={editImageUploading}
+                      activeOpacity={0.88}
+                    >
+                      <Text style={styles.editPhotoBtnText}>
+                        {editImageUploading ? "Загрузка…" : "Камера или галерея"}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  <Text style={styles.editFieldHintSecondary}>Или ссылка https://…</Text>
                   <TextInput
                     value={editDraft.image}
                     onChangeText={(t) => setEditDraft((d) => ({ ...d, image: t }))}
-                    placeholder="Фото (URL)"
+                    placeholder="https://…"
                     placeholderTextColor={theme.mutedForeground}
                     style={styles.editInput}
                     autoCapitalize="none"
                     autoCorrect={false}
                   />
+                  {editDraft.image.trim().length > 0 ? (
+                    <View style={styles.previewWrap}>
+                      <ImageWithFallback uri={editDraft.image.trim()} style={styles.previewImg} borderRadius={10} />
+                    </View>
+                  ) : null}
                   <TextInput
                     value={editDraft.description}
                     onChangeText={(t) => setEditDraft((d) => ({ ...d, description: t }))}
@@ -414,11 +524,6 @@ export function ItemDetailScreen() {
                     style={[styles.editInput, styles.editInputMultiline]}
                     multiline
                   />
-                  {editDraft.image.trim().length > 0 ? (
-                    <View style={styles.previewWrap}>
-                      <ImageWithFallback uri={editDraft.image.trim()} style={styles.previewImg} borderRadius={10} />
-                    </View>
-                  ) : null}
                   <View style={styles.editActions}>
                     <TouchableOpacity style={styles.editCancel} onPress={() => setEditOpen(false)} activeOpacity={0.88}>
                       <Text style={styles.editCancelText}>Отмена</Text>
@@ -465,6 +570,17 @@ const styles = StyleSheet.create({
     borderColor: theme.border,
   },
   editTitle: { fontSize: 18, fontWeight: "600", color: theme.foreground, marginBottom: 12 },
+  editFieldHint: { fontSize: 12, color: theme.mutedForeground, marginBottom: 6 },
+  editFieldHintSecondary: { fontSize: 11, color: theme.mutedForeground, marginBottom: 6, marginTop: 2, opacity: 0.9 },
+  editPhotoBtn: {
+    height: 44,
+    borderRadius: theme.radiusLg,
+    backgroundColor: theme.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  editPhotoBtnText: { color: theme.primaryForeground, fontWeight: "700", fontSize: 15 },
   editInput: {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.border,

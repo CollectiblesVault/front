@@ -33,6 +33,7 @@ import { ImageWithFallback } from "../components/ImageWithFallback";
 import { TabAwareScrollView } from "../components/TabAwareScrollView";
 import { getPublicCollectionItemsApi } from "../api/vaultApi";
 import { useAppSettings } from "../context/app-settings-context";
+import { pickImageFromDevice, uploadImageFromLocalUri } from "../utils/pickAndUploadImage";
 import { useCollectionsStore } from "../context/collections-store-context";
 import { useWishlist } from "../context/wishlist-context";
 import type { RootStackParamList } from "../navigation/types";
@@ -48,7 +49,7 @@ export function CollectionDetailScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<R>();
   const searchInputRef = useRef<TextInput>(null);
-  const { formatMoney, canInteract } = useAppSettings();
+  const { formatMoney, canInteract, authToken } = useAppSettings();
   const {
     itemsForCollection,
     collectionTitle,
@@ -140,6 +141,8 @@ export function CollectionDetailScreen() {
     image: "",
     description: "",
   });
+  const [newItemPhotoUploading, setNewItemPhotoUploading] = useState(false);
+  const [collectionCoverUploading, setCollectionCoverUploading] = useState(false);
 
   useEffect(() => {
     const fromRoute = route.params.collectionPreview?.name;
@@ -214,52 +217,89 @@ export function CollectionDetailScreen() {
     });
   }, [browse, requireAuth]);
 
-  const pickNewItemPhoto = useCallback(
+  const runUploadNewItemPhoto = useCallback(
     async (source: "camera" | "library") => {
+      if (!authToken) {
+        Alert.alert("Нужен вход", "Войдите в аккаунт, чтобы загрузить фото на сервер.");
+        return;
+      }
       try {
-        if (Platform.OS === "web") {
-          Alert.alert("Web-режим", "На web выберите фото по URL в поле ниже.");
-          return;
-        }
-
-        const ImagePicker = await import("expo-image-picker");
-        if (source === "camera") {
-          const perm = await ImagePicker.requestCameraPermissionsAsync();
-          if (perm.status !== "granted") {
-            Alert.alert("Нет доступа к камере", "Дайте разрешение, чтобы сделать фото.");
-            return;
-          }
-          const res = await ImagePicker.launchCameraAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true,
-            quality: 0.85,
-          });
-          const uri = res.assets?.[0]?.uri;
-          if (!res.canceled && uri) {
-            setNewItemDraft((d) => ({ ...d, image: uri }));
-          }
-        } else {
-          const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-          if (perm.status !== "granted") {
-            Alert.alert("Нет доступа к галерее", "Дайте разрешение, чтобы выбрать фото.");
-            return;
-          }
-          const res = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true,
-            quality: 0.85,
-          });
-          const uri = res.assets?.[0]?.uri;
-          if (!res.canceled && uri) {
-            setNewItemDraft((d) => ({ ...d, image: uri }));
-          }
-        }
-      } catch {
-        Alert.alert("Ошибка", "Не удалось выбрать фото. Попробуйте ещё раз.");
+        const picked = await pickImageFromDevice(source);
+        if (!picked) return;
+        setNewItemPhotoUploading(true);
+        const url = await uploadImageFromLocalUri({
+          token: authToken,
+          uri: picked.uri,
+          fileName: picked.fileName,
+          mimeType: picked.mimeType,
+        });
+        setNewItemDraft((d) => ({ ...d, image: url }));
+      } catch (e: any) {
+        Alert.alert("Загрузка не удалась", e?.message ? String(e.message) : "Попробуйте ещё раз.");
+      } finally {
+        setNewItemPhotoUploading(false);
       }
     },
-    [setNewItemDraft],
+    [authToken],
   );
+
+  const openNewItemPhotoMenu = useCallback(() => {
+    if (Platform.OS === "web") {
+      Alert.alert("Web", "Вставьте ссылку на изображение в поле ниже.");
+      return;
+    }
+    if (!authToken) {
+      Alert.alert("Нужен вход", "Войдите в аккаунт, чтобы загрузить фото.");
+      return;
+    }
+    Alert.alert("Фото предмета", "Файл будет загружен на сервер", [
+      { text: "Камера", onPress: () => void runUploadNewItemPhoto("camera") },
+      { text: "Галерея", onPress: () => void runUploadNewItemPhoto("library") },
+      { text: "Отмена", style: "cancel" },
+    ]);
+  }, [authToken, runUploadNewItemPhoto]);
+
+  const runUploadCollectionCover = useCallback(
+    async (source: "camera" | "library") => {
+      if (!authToken) {
+        Alert.alert("Нужен вход", "Войдите в аккаунт, чтобы загрузить обложку.");
+        return;
+      }
+      try {
+        const picked = await pickImageFromDevice(source);
+        if (!picked) return;
+        setCollectionCoverUploading(true);
+        const url = await uploadImageFromLocalUri({
+          token: authToken,
+          uri: picked.uri,
+          fileName: picked.fileName,
+          mimeType: picked.mimeType,
+        });
+        setCollectionImageDraft(url);
+      } catch (e: any) {
+        Alert.alert("Загрузка не удалась", e?.message ? String(e.message) : "Попробуйте ещё раз.");
+      } finally {
+        setCollectionCoverUploading(false);
+      }
+    },
+    [authToken],
+  );
+
+  const openCollectionCoverMenu = useCallback(() => {
+    if (Platform.OS === "web") {
+      Alert.alert("Web", "Вставьте ссылку на обложку в поле ниже.");
+      return;
+    }
+    if (!authToken) {
+      Alert.alert("Нужен вход", "Войдите в аккаунт, чтобы загрузить обложку.");
+      return;
+    }
+    Alert.alert("Обложка коллекции", "Файл будет загружен на сервер", [
+      { text: "Камера", onPress: () => void runUploadCollectionCover("camera") },
+      { text: "Галерея", onPress: () => void runUploadCollectionCover("library") },
+      { text: "Отмена", style: "cancel" },
+    ]);
+  }, [authToken, runUploadCollectionCover]);
 
   const submitNewItem = useCallback(() => {
     const price = Number.parseFloat(newItemDraft.price.replace(/\s/g, "").replace(",", "."));
@@ -268,6 +308,10 @@ export function CollectionDetailScreen() {
       return;
     }
     const img = newItemDraft.image.trim();
+    if (img.startsWith("file:") || img.startsWith("content:") || img.startsWith("ph://") || img.startsWith("assets-library:")) {
+      Alert.alert("Фото не загружено", "Сначала загрузите снимок на сервер или укажите https-ссылку.");
+      return;
+    }
     addItemToCollection(route.params.id, {
       name: newItemDraft.name.trim(),
       category: newItemDraft.category.trim() || "Разное",
@@ -462,7 +506,20 @@ export function CollectionDetailScreen() {
                       thumbColor={collectionPublicDraft ? theme.primaryForeground : theme.mutedForeground}
                     />
                   </View>
-                  <Text style={styles.fieldHint}>Обложка (URL фото)</Text>
+                  <Text style={styles.fieldHint}>Обложка</Text>
+                  {Platform.OS !== "web" ? (
+                    <TouchableOpacity
+                      style={[styles.photoPickBtn, collectionCoverUploading && { opacity: 0.6 }]}
+                      onPress={openCollectionCoverMenu}
+                      disabled={collectionCoverUploading}
+                      activeOpacity={0.88}
+                    >
+                      <Text style={styles.photoPickBtnText}>
+                        {collectionCoverUploading ? "Загрузка…" : "Камера или галерея"}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  <Text style={styles.fieldHintSecondary}>Или ссылка https://…</Text>
                   <TextInput
                     value={collectionImageDraft}
                     onChangeText={setCollectionImageDraft}
@@ -530,10 +587,24 @@ export function CollectionDetailScreen() {
                     placeholderTextColor={theme.mutedForeground}
                     style={styles.editInput}
                   />
+                  <Text style={styles.fieldHint}>Фото</Text>
+                  {Platform.OS !== "web" ? (
+                    <TouchableOpacity
+                      style={[styles.photoPickBtn, newItemPhotoUploading && { opacity: 0.6 }]}
+                      onPress={openNewItemPhotoMenu}
+                      disabled={newItemPhotoUploading}
+                      activeOpacity={0.88}
+                    >
+                      <Text style={styles.photoPickBtnText}>
+                        {newItemPhotoUploading ? "Загрузка…" : "Камера или галерея"}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  <Text style={styles.fieldHintSecondary}>Или ссылка https://…</Text>
                   <TextInput
                     value={newItemDraft.image}
                     onChangeText={(t) => setNewItemDraft((d) => ({ ...d, image: t }))}
-                    placeholder="Фото (URL)"
+                    placeholder="https://…"
                     placeholderTextColor={theme.mutedForeground}
                     style={styles.editInput}
                     autoCapitalize="none"
@@ -553,25 +624,6 @@ export function CollectionDetailScreen() {
                         activeOpacity={0.85}
                       >
                         <Text style={styles.photoClearText}>Очистить</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : null}
-
-                  {Platform.OS !== "web" ? (
-                    <View style={styles.photoPickRow}>
-                      <TouchableOpacity
-                        style={styles.photoPickBtn}
-                        onPress={() => pickNewItemPhoto("camera")}
-                        activeOpacity={0.88}
-                      >
-                        <Text style={styles.photoPickBtnText}>Камера</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.photoPickBtnOutline}
-                        onPress={() => pickNewItemPhoto("library")}
-                        activeOpacity={0.88}
-                      >
-                        <Text style={styles.photoPickBtnOutlineText}>Галерея</Text>
                       </TouchableOpacity>
                     </View>
                   ) : null}
@@ -816,6 +868,7 @@ const styles = StyleSheet.create({
   },
   editSheetTall: { maxWidth: 440 },
   fieldHint: { fontSize: 12, color: theme.mutedForeground, marginBottom: 6 },
+  fieldHintSecondary: { fontSize: 11, color: theme.mutedForeground, marginBottom: 6, marginTop: 4, opacity: 0.9 },
   publicRow: {
     flexDirection: "row",
     alignItems: "center",

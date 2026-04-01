@@ -27,6 +27,7 @@ import { useAppSettings } from "../context/app-settings-context";
 import { useCollectionsStore } from "../context/collections-store-context";
 import type { RootStackParamList } from "../navigation/types";
 import { theme } from "../theme";
+import { pickImageFromDevice, uploadImageFromLocalUri } from "../utils/pickAndUploadImage";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "Collections">;
 
@@ -42,13 +43,14 @@ function getMasonryAspect(seed: number) {
 export function CollectionsScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
-  const { formatMoney, canInteract } = useAppSettings();
+  const { formatMoney, canInteract, authToken } = useAppSettings();
   const { collectionsList, addCollection, isLoadingCollections } = useCollectionsStore();
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [isOffline] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPhoto, setNewPhoto] = useState("");
+  const [newCollectionPhotoUploading, setNewCollectionPhotoUploading] = useState(false);
 
   const totalItems = collectionsList.reduce((s, c) => s + c.itemCount, 0);
   const gridColumns = useMemo(() => {
@@ -74,7 +76,17 @@ export function CollectionsScreen() {
       Alert.alert("Нужен вход", "Создание коллекции доступно после входа в аккаунт.");
       return;
     }
-    const id = await addCollection(newName, newPhoto);
+    const photo = newPhoto.trim();
+    if (
+      photo.startsWith("file:") ||
+      photo.startsWith("content:") ||
+      photo.startsWith("ph://") ||
+      photo.startsWith("assets-library:")
+    ) {
+      Alert.alert("Обложка не загружена", "Сначала загрузите фото на сервер или оставьте обложку пустой.");
+      return;
+    }
+    const id = await addCollection(newName, photo);
     if (id == null) {
       Alert.alert("Ошибка", "Введите название коллекции.");
       return;
@@ -85,48 +97,43 @@ export function CollectionsScreen() {
     navigation.navigate("CollectionDetail", { id: String(id) });
   };
 
-  const pickNewCollectionPhoto = async (source: "camera" | "library") => {
-    try {
-      if (Platform.OS === "web") {
-        Alert.alert("Web-режим", "На web выберите фото по URL в поле ниже.");
-        return;
-      }
-
-      const ImagePicker = await import("expo-image-picker");
-      if (source === "camera") {
-        const perm = await ImagePicker.requestCameraPermissionsAsync();
-        if (perm.status !== "granted") {
-          Alert.alert("Нет доступа к камере", "Дайте разрешение, чтобы сделать фото.");
-          return;
-        }
-        const res = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          quality: 0.85,
-        });
-        const uri = res.assets?.[0]?.uri;
-        if (!res.canceled && uri) {
-          setNewPhoto(uri);
-        }
-      } else {
-        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (perm.status !== "granted") {
-          Alert.alert("Нет доступа к галерее", "Дайте разрешение, чтобы выбрать фото.");
-          return;
-        }
-        const res = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          quality: 0.85,
-        });
-        const uri = res.assets?.[0]?.uri;
-        if (!res.canceled && uri) {
-          setNewPhoto(uri);
-        }
-      }
-    } catch {
-      Alert.alert("Ошибка", "Не удалось выбрать фото. Попробуйте ещё раз.");
+  const runUploadNewCollectionPhoto = async (source: "camera" | "library") => {
+    if (!authToken) {
+      Alert.alert("Нужен вход", "Войдите в аккаунт, чтобы загрузить обложку.");
+      return;
     }
+    try {
+      const picked = await pickImageFromDevice(source);
+      if (!picked) return;
+      setNewCollectionPhotoUploading(true);
+      const url = await uploadImageFromLocalUri({
+        token: authToken,
+        uri: picked.uri,
+        fileName: picked.fileName,
+        mimeType: picked.mimeType,
+      });
+      setNewPhoto(url);
+    } catch (e: any) {
+      Alert.alert("Загрузка не удалась", e?.message ? String(e.message) : "Попробуйте ещё раз.");
+    } finally {
+      setNewCollectionPhotoUploading(false);
+    }
+  };
+
+  const openNewCollectionPhotoMenu = () => {
+    if (Platform.OS === "web") {
+      Alert.alert("Web", "Вставьте ссылку на обложку в поле ниже.");
+      return;
+    }
+    if (!authToken) {
+      Alert.alert("Нужен вход", "Войдите в аккаунт, чтобы загрузить обложку.");
+      return;
+    }
+    Alert.alert("Обложка коллекции", "Файл будет загружен на сервер", [
+      { text: "Камера", onPress: () => void runUploadNewCollectionPhoto("camera") },
+      { text: "Галерея", onPress: () => void runUploadNewCollectionPhoto("library") },
+      { text: "Отмена", style: "cancel" },
+    ]);
   };
 
   return (
@@ -298,6 +305,29 @@ export function CollectionsScreen() {
                     placeholderTextColor={theme.mutedForeground}
                     style={styles.createInput}
                   />
+                  <Text style={styles.createFieldHint}>Обложка (необязательно)</Text>
+                  {Platform.OS !== "web" ? (
+                    <TouchableOpacity
+                      style={[styles.photoPickBtn, newCollectionPhotoUploading && { opacity: 0.6 }]}
+                      onPress={openNewCollectionPhotoMenu}
+                      disabled={newCollectionPhotoUploading}
+                      activeOpacity={0.88}
+                    >
+                      <Text style={styles.photoPickBtnText}>
+                        {newCollectionPhotoUploading ? "Загрузка…" : "Камера или галерея"}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  <Text style={styles.createFieldHintMuted}>Или ссылка https://…</Text>
+                  <TextInput
+                    value={newPhoto}
+                    onChangeText={setNewPhoto}
+                    placeholder="https://…"
+                    placeholderTextColor={theme.mutedForeground}
+                    style={styles.createInput}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
                   {newPhoto.trim().length > 0 ? (
                     <View style={styles.photoPreviewWrap}>
                       <ImageWithFallback uri={newPhoto.trim()} style={styles.photoPreview} borderRadius={14} />
@@ -307,25 +337,6 @@ export function CollectionsScreen() {
                         activeOpacity={0.85}
                       >
                         <Text style={styles.photoClearText}>Очистить</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : null}
-
-                  {Platform.OS !== "web" ? (
-                    <View style={styles.photoPickRow}>
-                      <TouchableOpacity
-                        style={styles.photoPickBtn}
-                        onPress={() => pickNewCollectionPhoto("camera")}
-                        activeOpacity={0.88}
-                      >
-                        <Text style={styles.photoPickBtnText}>Камера</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.photoPickBtnOutline}
-                        onPress={() => pickNewCollectionPhoto("library")}
-                        activeOpacity={0.88}
-                      >
-                        <Text style={styles.photoPickBtnOutlineText}>Галерея</Text>
                       </TouchableOpacity>
                     </View>
                   ) : null}
@@ -447,6 +458,8 @@ const styles = StyleSheet.create({
     borderColor: theme.border,
   },
   createTitle: { fontSize: 18, fontWeight: "600", color: theme.foreground, marginBottom: 12 },
+  createFieldHint: { fontSize: 12, color: theme.mutedForeground, marginBottom: 8 },
+  createFieldHintMuted: { fontSize: 11, color: theme.mutedForeground, marginBottom: 8, opacity: 0.9 },
   createInput: {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.border,
