@@ -267,7 +267,7 @@ export function UserProfileScreen() {
                 const img = String(c?.image_url ?? c?.image ?? "");
                 const total = Number(c?.total_value_usd ?? c?.totalValueUsd ?? 0) || 0;
                 const itemsCount = Number(c?.items_count ?? c?.itemsCount ?? 0) || 0;
-                // Without an endpoint for user's public collection items here, we don't render item list previews.
+                // Нет отдельного эндпоинта превью предметов — список внутри коллекции не рисуем.
                 return (
                   <View key={String(id)} style={styles.collectionCard}>
                     <View style={styles.collectionTop}>

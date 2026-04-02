@@ -14,6 +14,7 @@ import { useAppSettings } from "../context/app-settings-context";
 import { getPublicCollectionItemsApi, getPublicUsersApi, getUserCollectionsApi } from "../api/vaultApi";
 import type { RootStackParamList } from "../navigation/types";
 import { theme } from "../theme";
+import { pluralRu } from "../utils/pluralRu";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "Community">;
 const gap = 12;
@@ -130,8 +131,10 @@ export function CommunityScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <View style={styles.headerTop}>
           <View>
-            <Text style={styles.h1}>Collections</Text>
-            <Text style={styles.sub}>{list.length} collections</Text>
+            <Text style={styles.h1}>Публичные коллекции</Text>
+            <Text style={styles.sub}>
+              {list.length} {pluralRu(list.length, "коллекция", "коллекции", "коллекций")}
+            </Text>
           </View>
           <View style={styles.toggleRow}>
             <TouchableOpacity
@@ -230,7 +233,9 @@ export function CommunityScreen() {
                       </View>
                       <View style={styles.gridMeta}>
                         <Text style={styles.name} numberOfLines={1}>{c.name}</Text>
-                        <Text style={styles.handle}>{c.itemsCount} items</Text>
+                        <Text style={styles.handle}>
+                          {c.itemsCount} {pluralRu(c.itemsCount, "предмет", "предмета", "предметов")}
+                        </Text>
                         <Text style={styles.stats}>{formatMoney(c.totalValueUsd)}</Text>
                       </View>
                     </TouchableOpacity>
@@ -257,9 +262,10 @@ export function CommunityScreen() {
                   <Text style={styles.name} numberOfLines={1}>
                     {c.name}
                   </Text>
-                  <Text style={styles.handle}>Owner: {c.ownerName}</Text>
+                  <Text style={styles.handle}>Владелец: {c.ownerName}</Text>
                   <Text style={styles.stats}>
-                    {c.itemsCount} items · {formatMoney(c.totalValueUsd)}
+                    {c.itemsCount} {pluralRu(c.itemsCount, "предмет", "предмета", "предметов")} ·{" "}
+                    {formatMoney(c.totalValueUsd)}
                   </Text>
                 </View>
                 <ChevronRight size={20} color={theme.mutedForeground} />

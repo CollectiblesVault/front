@@ -252,7 +252,7 @@ export function HomeScreen() {
                     value={profileEmailDraft}
                     onChangeText={setProfileEmailDraft}
                     style={styles.profileInputEmail}
-                    placeholder="Email"
+                    placeholder="Электронная почта"
                     placeholderTextColor={theme.mutedForeground}
                     keyboardType="email-address"
                     autoCapitalize="none"

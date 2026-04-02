@@ -28,6 +28,7 @@ import { useCollectionsStore } from "../context/collections-store-context";
 import type { RootStackParamList } from "../navigation/types";
 import { theme } from "../theme";
 import { pickImageFromDevice, uploadImageFromLocalUri } from "../utils/pickAndUploadImage";
+import { pluralRu } from "../utils/pluralRu";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "Collections">;
 
@@ -122,7 +123,7 @@ export function CollectionsScreen() {
 
   const openNewCollectionPhotoMenu = () => {
     if (Platform.OS === "web") {
-      Alert.alert("Web", "Вставьте ссылку на обложку в поле ниже.");
+      Alert.alert("Веб-версия", "Вставьте ссылку на обложку в поле ниже.");
       return;
     }
     if (!authToken) {
@@ -142,9 +143,11 @@ export function CollectionsScreen() {
       <View style={[styles.stickyHeader, { paddingTop: insets.top + 8 }]}>
         <View style={styles.headerTop}>
           <View>
-            <Text style={styles.h1}>Collections</Text>
+            <Text style={styles.h1}>Коллекции</Text>
             <Text style={styles.sub}>
-              {collectionsList.length} collections • {totalItems} items
+              {collectionsList.length}{" "}
+              {pluralRu(collectionsList.length, "коллекция", "коллекции", "коллекций")} • {totalItems}{" "}
+              {pluralRu(totalItems, "предмет", "предмета", "предметов")}
             </Text>
           </View>
           <View style={styles.toggleRow}>
@@ -228,7 +231,9 @@ export function CollectionsScreen() {
                       <Text style={styles.cardTitle} numberOfLines={1}>
                         {c.name}
                       </Text>
-                      <Text style={styles.cardSub}>{c.itemCount} items</Text>
+                      <Text style={styles.cardSub}>
+                        {c.itemCount} {pluralRu(c.itemCount, "предмет", "предмета", "предметов")}
+                      </Text>
                       <Text style={styles.cardPrice}>{formatMoney(c.totalValue)}</Text>
                     </View>
                   </TouchableOpacity>
@@ -252,7 +257,9 @@ export function CollectionsScreen() {
                   <Text style={styles.cardTitle} numberOfLines={1}>
                     {c.name}
                   </Text>
-                  <Text style={styles.cardSub}>{c.itemCount} items</Text>
+                  <Text style={styles.cardSub}>
+                    {c.itemCount} {pluralRu(c.itemCount, "предмет", "предмета", "предметов")}
+                  </Text>
                   <Text style={styles.cardPrice}>{formatMoney(c.totalValue)}</Text>
                 </View>
               </TouchableOpacity>
@@ -270,12 +277,12 @@ export function CollectionsScreen() {
             {isOffline ? (
               <>
                 <WifiOff size={20} color={theme.primaryForeground} style={{ marginRight: 8 }} />
-                <Text style={styles.addBtnText}>Offline</Text>
+                <Text style={styles.addBtnText}>Офлайн</Text>
               </>
             ) : (
               <>
                 <Plus size={20} color={theme.primaryForeground} style={{ marginRight: 8 }} />
-                <Text style={styles.addBtnText}>New Collection</Text>
+                <Text style={styles.addBtnText}>Новая коллекция</Text>
               </>
             )}
           </TouchableOpacity>

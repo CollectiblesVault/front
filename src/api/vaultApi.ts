@@ -42,7 +42,7 @@ async function apiRequest<T = any>({ method, path, query, token, body, headers }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`API error ${res.status}: ${text || res.statusText}`);
+    throw new Error(`Ошибка API ${res.status}: ${text || res.statusText}`);
   }
 
   // Some endpoints (e.g. CSV) return non-JSON.
@@ -88,7 +88,7 @@ async function multipartPostJson({
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`API error ${res.status}: ${text || res.statusText}`);
+    throw new Error(`Ошибка API ${res.status}: ${text || res.statusText}`);
   }
   return (await res.json()) as any;
 }
@@ -874,6 +874,58 @@ export async function deactivateMeApi({ token }: { token: string }) {
     method: "PATCH",
     path: "/api/auth/me/deactivate",
     token,
+  });
+}
+
+// --- Кошелёк (баланс в USD; эндпоинты добавить на бэке) ---
+
+/** Разбор ответа GET `/api/wallet` и похожих схем. */
+export function parseWalletBalance(raw: unknown): number | null {
+  if (raw == null || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const nested = r.wallet && typeof r.wallet === "object" ? (r.wallet as Record<string, unknown>) : null;
+  const n = Number(
+    r.balance_usd ??
+      r.balanceUsd ??
+      r.balance ??
+      r.wallet_balance ??
+      r.amount_usd ??
+      nested?.balance_usd ??
+      nested?.balance,
+  );
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Текущий баланс кошелька пользователя (USD). */
+export async function getWalletBalanceApi({ token }: { token: string }) {
+  return apiRequest<any>({
+    method: "GET",
+    path: "/api/wallet",
+    token,
+  });
+}
+
+/**
+ * Пополнение кошелька (тест, админ или callback платежа).
+ * Тело: сумма в USD; опционально внешний `reference`.
+ */
+export async function postWalletDepositApi({
+  token,
+  amount_usd,
+  reference,
+}: {
+  token: string;
+  amount_usd: number | string;
+  reference?: string | null;
+}) {
+  return apiRequest<any>({
+    method: "POST",
+    path: "/api/wallet/deposit",
+    token,
+    body: {
+      amount_usd,
+      ...(reference != null && String(reference).trim() ? { reference: String(reference).trim() } : {}),
+    },
   });
 }
 

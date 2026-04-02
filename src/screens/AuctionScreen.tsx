@@ -15,7 +15,16 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Polyline } from "react-native-svg";
 
-import { closeLotApi, createBidApi, createLotApi, getLotBidsApi, getLotsApi, settleExpiredLotsApi } from "../api/vaultApi";
+import {
+  closeLotApi,
+  createBidApi,
+  createLotApi,
+  getLotBidsApi,
+  getLotsApi,
+  getWalletBalanceApi,
+  parseWalletBalance,
+  settleExpiredLotsApi,
+} from "../api/vaultApi";
 import { BottomNav } from "../components/BottomNav";
 import { ErrorState } from "../components/ErrorState";
 import { ImageWithFallback } from "../components/ImageWithFallback";
@@ -25,6 +34,7 @@ import { TabAwareScrollView } from "../components/TabAwareScrollView";
 import { useAppSettings } from "../context/app-settings-context";
 import { useCollectionsStore } from "../context/collections-store-context";
 import { theme } from "../theme";
+import { pluralRu } from "../utils/pluralRu";
 
 type LotRow = {
   id: number;
@@ -82,7 +92,8 @@ export function AuctionScreen() {
   const [itemPickerOpen, setItemPickerOpen] = useState(false);
   const [durationPickerOpen, setDurationPickerOpen] = useState(false);
   const [durationDraft, setDurationDraft] = useState("2");
-  const [bidMap, setBidMap] = useState<Record<number, string>>({});
+  /** Надбавка к текущей цене лота (не итоговая сумма ставки). */
+  const [bidIncrementByLotId, setBidIncrementByLotId] = useState<Record<number, string>>({});
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -190,19 +201,19 @@ export function AuctionScreen() {
   const leftTime = useCallback((iso: string) => {
     if (!iso) return "—";
     const diff = new Date(iso).getTime() - Date.now();
-    if (diff <= 0) return "Ended";
+    if (diff <= 0) return "Завершён";
     const mins = Math.floor(diff / (1000 * 60));
     const days = Math.floor(mins / (60 * 24));
     const hours = Math.floor((mins % (60 * 24)) / 60);
     const minutes = mins % 60;
-    if (days > 0) return `${days}d ${hours}h left`;
-    return `${hours}h ${minutes}m left`;
+    if (days > 0) return `Осталось ${days} дн. ${hours} ч`;
+    return `Осталось ${hours} ч ${minutes} мин`;
   }, []);
 
   const lotStatus = useCallback((lot: LotRow) => {
-    if (lot.isCompleted) return { label: "Outbid", tone: "danger" as const };
-    if (lot.myBid > 0 && lot.myBid >= lot.currentPrice) return { label: "Winning", tone: "warn" as const };
-    return { label: "Watching", tone: "neutral" as const };
+    if (lot.isCompleted) return { label: "Перебили", tone: "danger" as const };
+    if (lot.myBid > 0 && lot.myBid >= lot.currentPrice) return { label: "Лидируете", tone: "warn" as const };
+    return { label: "Наблюдаете", tone: "neutral" as const };
   }, []);
 
   const draftCollectionItems = useMemo(
@@ -276,20 +287,29 @@ export function AuctionScreen() {
       Alert.alert("Нужен вход", "Ставки доступны после входа.");
       return;
     }
-    const raw = bidMap[lot.id] ?? "";
-    const amount = toNumber(raw, NaN);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      Alert.alert("Проверьте ставку", "Введите сумму ставки.");
+    const minStep = lot.step > 0 ? lot.step : 1;
+    const raw = (bidIncrementByLotId[lot.id] ?? "").trim().replace(/\s/g, "").replace(",", ".");
+    const increment = toNumber(raw, NaN);
+    if (!Number.isFinite(increment)) {
+      Alert.alert("Проверьте надбавку", "Укажите сумму, которую добавляете к текущей цене.");
       return;
     }
-    if (amount > walletBalance) {
-      Alert.alert("Недостаточно средств", "Пополните кошелёк или уменьшите ставку.");
+    if (increment < minStep) {
+      Alert.alert(
+        "Проверьте надбавку",
+        `Минимальная надбавка к текущей цене: ${formatMoney(minStep)}.`,
+      );
+      return;
+    }
+    const totalBid = lot.currentPrice + increment;
+    if (totalBid > walletBalance) {
+      Alert.alert("Недостаточно средств", "Пополните кошелёк или уменьшите надбавку.");
       return;
     }
     try {
-      await createBidApi({ token: authToken, lot_id: lot.id, amount });
+      await createBidApi({ token: authToken, lot_id: lot.id, amount: totalBid });
       const nowIso = new Date().toISOString();
-      const bidderName = userProfile?.displayName?.trim() || "You";
+      const bidderName = userProfile?.displayName?.trim() || "Вы";
       const bidderAvatar = userProfile?.avatarUrl;
       setLots((prev) =>
         prev.map((x) =>
@@ -297,15 +317,22 @@ export function AuctionScreen() {
             ? x
             : {
                 ...x,
-                currentPrice: Math.max(x.currentPrice, amount),
-                myBid: amount,
+                currentPrice: Math.max(x.currentPrice, totalBid),
+                myBid: totalBid,
                 bidsCount: x.bidsCount + 1,
-                bidHistory: [...x.bidHistory, { price: amount, time: nowIso, bidderName, bidderAvatar }],
+                bidHistory: [...x.bidHistory, { price: totalBid, time: nowIso, bidderName, bidderAvatar }],
               },
         ),
       );
-      setBidMap((prev) => ({ ...prev, [lot.id]: "" }));
-      setWalletBalance(walletBalance - amount);
+      setBidIncrementByLotId((prev) => ({ ...prev, [lot.id]: "" }));
+      try {
+        const w = await getWalletBalanceApi({ token: authToken });
+        const b = parseWalletBalance(w);
+        if (b != null) setWalletBalance(b);
+        else setWalletBalance((prev) => Math.max(0, prev - totalBid));
+      } catch {
+        setWalletBalance((prev) => Math.max(0, prev - totalBid));
+      }
     } catch (e: any) {
       Alert.alert("Ставка не принята", e?.message ? String(e.message) : "Попробуйте ещё раз.");
     }
@@ -316,12 +343,18 @@ export function AuctionScreen() {
       <OfflineBanner isOffline={isOffline} />
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <View>
-          <Text style={styles.h1}>Auctions</Text>
-          <Text style={styles.sub}>{activeLots.length} active lots</Text>
+          <Text style={styles.h1}>Аукционы</Text>
+          <Text style={styles.sub}>
+            {(() => {
+              const n = activeLots.length;
+              const adj = n % 10 === 1 && n % 100 !== 11 ? "активный" : "активных";
+              return `${n} ${adj} ${pluralRu(n, "лот", "лота", "лотов")}`;
+            })()}
+          </Text>
         </View>
         <View style={styles.headerRight}>
           <View style={styles.walletBox}>
-            <Text style={styles.walletLabel}>Wallet</Text>
+            <Text style={styles.walletLabel}>Кошелёк</Text>
             <Text style={styles.walletValue}>{formatMoney(walletBalance)}</Text>
           </View>
           <TouchableOpacity style={styles.createBtn} onPress={() => setCreateOpen(true)} activeOpacity={0.9}>
@@ -336,14 +369,14 @@ export function AuctionScreen() {
           onPress={() => setTab("active")}
           activeOpacity={0.9}
         >
-          <Text style={[styles.tabBtnText, tab === "active" && styles.tabBtnTextOn]}>{`Active (${activeLots.length})`}</Text>
+          <Text style={[styles.tabBtnText, tab === "active" && styles.tabBtnTextOn]}>{`Активные (${activeLots.length})`}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tabBtn, tab === "completed" && styles.tabBtnOn]}
           onPress={() => setTab("completed")}
           activeOpacity={0.9}
         >
-          <Text style={[styles.tabBtnText, tab === "completed" && styles.tabBtnTextOn]}>{`Completed (${completedLots.length})`}</Text>
+          <Text style={[styles.tabBtnText, tab === "completed" && styles.tabBtnTextOn]}>{`Завершённые (${completedLots.length})`}</Text>
         </TouchableOpacity>
       </View>
 
@@ -363,7 +396,7 @@ export function AuctionScreen() {
           ) : shownLots.length === 0 ? (
             <View style={styles.emptyWrap}>
               <Gavel size={28} color={theme.mutedForeground} />
-              <Text style={styles.emptyText}>No lots in this tab</Text>
+              <Text style={styles.emptyText}>В этой вкладке нет лотов</Text>
             </View>
           ) : (
             shownLots.map((lot) => {
@@ -398,15 +431,17 @@ export function AuctionScreen() {
                       <Clock3 size={13} color={theme.mutedForeground} />
                       <Text style={styles.timeText}>{leftTime(lot.endTime)}</Text>
                       <Text style={styles.dotSep}>•</Text>
-                      <Text style={styles.timeText}>{lot.bidsCount} bids</Text>
+                      <Text style={styles.timeText}>
+                        {lot.bidsCount} {pluralRu(lot.bidsCount, "ставка", "ставки", "ставок")}
+                      </Text>
                     </View>
                     <View style={styles.bidsRow}>
                       <View>
-                        <Text style={styles.metaLabel}>Current Bid</Text>
+                        <Text style={styles.metaLabel}>Текущая ставка</Text>
                         <Text style={styles.price}>{formatMoney(lot.currentPrice)}</Text>
                       </View>
                       <View style={{ alignItems: "flex-end" }}>
-                        <Text style={styles.metaLabel}>Your Bid</Text>
+                        <Text style={styles.metaLabel}>Ваша ставка</Text>
                         <Text style={styles.myPrice}>{formatMoney(lot.myBid || 0)}</Text>
                       </View>
                     </View>
@@ -416,21 +451,36 @@ export function AuctionScreen() {
                   <Text style={styles.chartBtnText}>График ставок</Text>
                 </TouchableOpacity>
                 {lot.isCompleted && lot.transferredTo ? (
-                  <Text style={styles.transferText}>Transferred to: {lot.transferredTo}</Text>
+                  <Text style={styles.transferText}>Передано: {lot.transferredTo}</Text>
                 ) : null}
                 {!lot.isCompleted ? (
-                  <View style={styles.bidRow}>
-                    <TextInput
-                      value={bidMap[lot.id] ?? ""}
-                      onChangeText={(v) => setBidMap((prev) => ({ ...prev, [lot.id]: v }))}
-                      placeholder={`Min +${formatMoney(lot.step || 1)}`}
-                      placeholderTextColor={theme.mutedForeground}
-                      keyboardType="decimal-pad"
-                      style={styles.bidInput}
-                    />
-                    <TouchableOpacity style={styles.bidBtn} onPress={() => void placeBid(lot)} activeOpacity={0.88}>
-                      <Text style={styles.bidBtnText}>Bid</Text>
-                    </TouchableOpacity>
+                  <View style={styles.bidCol}>
+                    <Text style={styles.bidHint}>
+                      Надбавка к {formatMoney(lot.currentPrice)} (мин. {formatMoney(lot.step > 0 ? lot.step : 1)})
+                    </Text>
+                    <View style={styles.bidRow}>
+                      <TextInput
+                        value={bidIncrementByLotId[lot.id] ?? ""}
+                        onChangeText={(v) => setBidIncrementByLotId((prev) => ({ ...prev, [lot.id]: v }))}
+                        placeholder={formatMoney(lot.step > 0 ? lot.step : 1)}
+                        placeholderTextColor={theme.mutedForeground}
+                        keyboardType="decimal-pad"
+                        style={styles.bidInput}
+                      />
+                      <TouchableOpacity style={styles.bidBtn} onPress={() => void placeBid(lot)} activeOpacity={0.88}>
+                        <Text style={styles.bidBtnText}>Ставка</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {(() => {
+                      const r = (bidIncrementByLotId[lot.id] ?? "").trim().replace(/\s/g, "").replace(",", ".");
+                      const inc = toNumber(r, NaN);
+                      if (!Number.isFinite(inc) || inc <= 0) return null;
+                      return (
+                        <Text style={styles.bidTotalPreview}>
+                          Итого ставка: {formatMoney(lot.currentPrice + inc)}
+                        </Text>
+                      );
+                    })()}
                   </View>
                 ) : null}
               </View>
@@ -579,7 +629,7 @@ export function AuctionScreen() {
                     onPress={() => setDurationDraft(String(d))}
                     activeOpacity={0.88}
                   >
-                    <Text style={[styles.presetChipText, selected && styles.presetChipTextOn]}>{`${d} д`}</Text>
+                    <Text style={[styles.presetChipText, selected && styles.presetChipTextOn]}>{`${d} дн.`}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -703,7 +753,10 @@ const styles = StyleSheet.create({
   bidsRow: { marginTop: 8, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   metaLabel: { fontSize: 11, color: theme.mutedForeground, marginBottom: 2 },
   transferText: { marginTop: 10, fontSize: 12, color: theme.primary, fontWeight: "600" },
-  bidRow: { marginTop: 12, flexDirection: "row", gap: 10, alignItems: "center" },
+  bidCol: { marginTop: 12 },
+  bidHint: { fontSize: 11, color: theme.mutedForeground, marginBottom: 6 },
+  bidTotalPreview: { fontSize: 12, color: theme.primary, fontWeight: "600", marginTop: 8 },
+  bidRow: { flexDirection: "row", gap: 10, alignItems: "center" },
   bidInput: {
     flex: 1,
     borderWidth: StyleSheet.hairlineWidth,
@@ -808,7 +861,8 @@ function AuctionBidChart({
   bidHistory: AuctionBidPoint[];
   formatMoney: (usd: number) => string;
 }) {
-  const history = bidHistory.length > 0 ? bidHistory : [{ price: 0, time: new Date().toISOString(), bidderName: "Start" }];
+  const history =
+    bidHistory.length > 0 ? bidHistory : [{ price: 0, time: new Date().toISOString(), bidderName: "Старт" }];
   const prices = history.map((h) => h.price);
   const max = Math.max(...prices, 1);
   const min = Math.min(...prices, 0);

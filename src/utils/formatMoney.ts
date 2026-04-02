@@ -71,10 +71,10 @@ export function formatCurrencyThousands(amountUsd: number, code: CurrencyCode): 
   const symbol = currencySymbol(code);
   return code === "RUB"
     ? `${k.toLocaleString("ru-RU")}\u00A0тыс.\u00A0${symbol}`
-    : `${symbol}${k.toLocaleString("ru-RU")}\u00A0k`;
+    : `${symbol}${k.toLocaleString("ru-RU")}\u00A0тыс.`;
 }
 
-/** @deprecated используйте formatCurrency с контекстом валюты */
+/** @deprecated используйте formatCurrency с выбранной валютой */
 export function formatUsd(n: number): string {
   return formatCurrency(n, "USD");
 }

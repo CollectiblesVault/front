@@ -205,7 +205,7 @@ export function ItemDetailScreen() {
 
   const openEditItemPhotoMenu = useCallback(() => {
     if (Platform.OS === "web") {
-      Alert.alert("Web", "Вставьте ссылку на изображение в поле ниже.");
+      Alert.alert("Веб-версия", "Вставьте ссылку на изображение в поле ниже.");
       return;
     }
     if (!authToken) {
@@ -360,7 +360,7 @@ export function ItemDetailScreen() {
             <Text style={styles.metaLine}>{base?.category ?? "—"}</Text>
             <View style={styles.kpiRow}>
               <View style={styles.kpiCard}>
-                <Text style={styles.kpiLabel}>Current Value</Text>
+                <Text style={styles.kpiLabel}>Текущая оценка</Text>
                 <Text style={styles.kpiValue}>{formatMoney(base?.price ?? 0)}</Text>
               </View>
             </View>
@@ -383,7 +383,9 @@ export function ItemDetailScreen() {
                 <View style={styles.socialBtn}>
                   <MessageCircle size={16} color={theme.mutedForeground} />
                   <Text style={styles.socialText}>
-                    {isLoadingComments ? "…" : comments.length} comments
+                    {isLoadingComments
+                      ? "…"
+                      : `${comments.length} ${pluralRu(comments.length, "комментарий", "комментария", "комментариев")}`}
                   </Text>
                 </View>
                 <TouchableOpacity onPress={handleWishlistToggle} style={styles.socialBtn} disabled={!canInteract} activeOpacity={0.85}>
@@ -392,7 +394,7 @@ export function ItemDetailScreen() {
                     color={inWishlist ? theme.primary : theme.mutedForeground}
                     fill={inWishlist ? theme.primary : "transparent"}
                   />
-                  <Text style={styles.socialText}>{inWishlist ? "Saved" : "Save"}</Text>
+                  <Text style={styles.socialText}>{inWishlist ? "В желаниях" : "В желания"}</Text>
                 </TouchableOpacity>
               </View>
 

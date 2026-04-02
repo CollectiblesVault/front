@@ -135,7 +135,7 @@ export function LoginScreen() {
             <TextInput
               value={email}
               onChangeText={setEmail}
-              placeholder="Email"
+              placeholder="Электронная почта"
               placeholderTextColor={theme.mutedForeground}
               keyboardType="email-address"
               autoCapitalize="none"

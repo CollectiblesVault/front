@@ -614,7 +614,7 @@ export function ReportsScreen() {
         <Pressable style={styles.modalBackdrop} onPress={() => setIsExportRangeOpen(false)}>
           <Pressable style={[styles.filterSheet, { paddingBottom: Math.max(insets.bottom, 16) }]} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.filterSheetTitle}>Экспорт CSV</Text>
-            <Text style={styles.filterSheetSub}>Выберите диапазон дат отчета</Text>
+            <Text style={styles.filterSheetSub}>Выберите диапазон дат отчёта</Text>
             <View style={styles.toggleRow}>
               <Text style={styles.toggleLabel}>С даты</Text>
               <Text style={styles.togglePillTextOn}>{formatDateLabel(exportFromDate)}</Text>

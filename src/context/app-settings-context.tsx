@@ -7,7 +7,7 @@ import {
   refreshCurrencyRates,
 } from "../utils/formatMoney";
 import { persistGet, persistSet } from "../utils/persist";
-import { meApi } from "../api/vaultApi";
+import { getWalletBalanceApi, meApi, parseWalletBalance } from "../api/vaultApi";
 
 export interface UserProfile {
   email: string;
@@ -36,7 +36,7 @@ interface AppSettingsValue {
 const AppSettingsContext = createContext<AppSettingsValue | null>(null);
 
 function buildAvatarFallback(displayName: string, email: string) {
-  const seed = encodeURIComponent((displayName || email || "User").trim());
+  const seed = encodeURIComponent((displayName || email || "Пользователь").trim());
   return `https://ui-avatars.com/api/?name=${seed}&background=1A1A1A&color=FFFFFF&size=256`;
 }
 
@@ -45,7 +45,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
   const [, setRatesVersion] = useState(0);
   const [hideFromSearch, setHideFromSearch] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [walletBalance, setWalletBalance] = useState<number>(100000);
+  const [walletBalance, setWalletBalance] = useState<number>(0);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [isAuthHydrating, setIsAuthHydrating] = useState(true);
   const didHydrateRef = useRef(false);
@@ -54,7 +54,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     setUserProfile(null);
-    setWalletBalance(100000);
+    setWalletBalance(0);
     setAuthToken(null);
     void persistSet("authToken", null);
     void persistSet("userProfile", null);
@@ -134,6 +134,28 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (isAuthHydrating) return;
+    if (!authToken) {
+      setWalletBalance(0);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await getWalletBalanceApi({ token: authToken });
+        if (cancelled) return;
+        const b = parseWalletBalance(raw);
+        if (b != null) setWalletBalance(b);
+      } catch {
+        /* GET /api/wallet может отсутствовать на бэке */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken, isAuthHydrating]);
 
   useEffect(() => {
     if (!didHydrateRef.current) return;

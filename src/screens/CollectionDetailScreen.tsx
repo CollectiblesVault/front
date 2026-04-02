@@ -245,7 +245,7 @@ export function CollectionDetailScreen() {
 
   const openNewItemPhotoMenu = useCallback(() => {
     if (Platform.OS === "web") {
-      Alert.alert("Web", "Вставьте ссылку на изображение в поле ниже.");
+      Alert.alert("Веб-версия", "Вставьте ссылку на изображение в поле ниже.");
       return;
     }
     if (!authToken) {
@@ -287,7 +287,7 @@ export function CollectionDetailScreen() {
 
   const openCollectionCoverMenu = useCallback(() => {
     if (Platform.OS === "web") {
-      Alert.alert("Web", "Вставьте ссылку на обложку в поле ниже.");
+      Alert.alert("Веб-версия", "Вставьте ссылку на обложку в поле ниже.");
       return;
     }
     if (!authToken) {
