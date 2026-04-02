@@ -10,6 +10,8 @@ import { persistGet, persistSet } from "../utils/persist";
 import { getWalletBalanceApi, meApi, parseWalletBalance } from "../api/vaultApi";
 
 export interface UserProfile {
+  /** С бэка `/api/auth/me` — для сопоставления со ставками (bidder_id). */
+  id?: number;
   email: string;
   displayName: string;
   avatarUrl?: string;
@@ -81,8 +83,15 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
             const email = typeof parsed?.email === "string" ? parsed.email : "";
             const displayName = typeof parsed?.displayName === "string" ? parsed.displayName : "";
             const avatarUrl = typeof parsed?.avatarUrl === "string" ? parsed.avatarUrl : "";
+            const id =
+              typeof parsed?.id === "number" && Number.isFinite(parsed.id) ? parsed.id : undefined;
             if (email || displayName) {
-              setUserProfile({ email, displayName, avatarUrl: avatarUrl || buildAvatarFallback(displayName, email) });
+              setUserProfile({
+                ...(id != null ? { id } : {}),
+                email,
+                displayName,
+                avatarUrl: avatarUrl || buildAvatarFallback(displayName, email),
+              });
             }
           } catch {
             // ignore
@@ -107,9 +116,18 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
                 : typeof me?.avatarUrl === "string"
                   ? me.avatarUrl
                   : "";
+            const userIdRaw = me?.id ?? me?.user_id;
+            const id =
+              typeof userIdRaw === "number" && Number.isFinite(userIdRaw)
+                ? userIdRaw
+                : typeof userIdRaw === "string"
+                  ? Number.parseInt(userIdRaw, 10)
+                  : undefined;
+            const resolvedId = id != null && Number.isFinite(id) ? id : undefined;
             if (email || displayName) {
               const resolvedName = displayName || email || "Пользователь";
               const profile = {
+                ...(resolvedId != null ? { id: resolvedId } : {}),
                 email,
                 displayName: resolvedName,
                 avatarUrl: avatarUrl || buildAvatarFallback(resolvedName, email),

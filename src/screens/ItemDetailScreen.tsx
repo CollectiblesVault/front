@@ -204,12 +204,12 @@ export function ItemDetailScreen() {
   );
 
   const openEditItemPhotoMenu = useCallback(() => {
-    if (Platform.OS === "web") {
-      Alert.alert("Веб-версия", "Вставьте ссылку на изображение в поле ниже.");
-      return;
-    }
     if (!authToken) {
       Alert.alert("Нужен вход", "Войдите в аккаунт, чтобы загрузить фото.");
+      return;
+    }
+    if (Platform.OS === "web") {
+      void runUploadEditItemPhoto("library");
       return;
     }
     Alert.alert("Фото предмета", "Файл будет загружен на сервер", [
@@ -238,7 +238,7 @@ export function ItemDetailScreen() {
       imgDraft.startsWith("ph://") ||
       imgDraft.startsWith("assets-library:")
     ) {
-      Alert.alert("Фото не загружено", "Сначала загрузите снимок на сервер или укажите https-ссылку.");
+      Alert.alert("Фото не загружено", "Сначала загрузите снимок на сервер.");
       return;
     }
     updateItemInCollection(cid, base.id, {
@@ -491,28 +491,20 @@ export function ItemDetailScreen() {
                     style={styles.editInput}
                   />
                   <Text style={styles.editFieldHint}>Фото</Text>
-                  {Platform.OS !== "web" ? (
-                    <TouchableOpacity
-                      style={[styles.editPhotoBtn, editImageUploading && { opacity: 0.6 }]}
-                      onPress={openEditItemPhotoMenu}
-                      disabled={editImageUploading}
-                      activeOpacity={0.88}
-                    >
-                      <Text style={styles.editPhotoBtnText}>
-                        {editImageUploading ? "Загрузка…" : "Камера или галерея"}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : null}
-                  <Text style={styles.editFieldHintSecondary}>Или ссылка https://…</Text>
-                  <TextInput
-                    value={editDraft.image}
-                    onChangeText={(t) => setEditDraft((d) => ({ ...d, image: t }))}
-                    placeholder="https://…"
-                    placeholderTextColor={theme.mutedForeground}
-                    style={styles.editInput}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
+                  <TouchableOpacity
+                    style={[styles.editPhotoBtn, editImageUploading && { opacity: 0.6 }]}
+                    onPress={openEditItemPhotoMenu}
+                    disabled={editImageUploading}
+                    activeOpacity={0.88}
+                  >
+                    <Text style={styles.editPhotoBtnText}>
+                      {editImageUploading
+                        ? "Загрузка…"
+                        : Platform.OS === "web"
+                          ? "Выбрать изображение"
+                          : "Камера или галерея"}
+                    </Text>
+                  </TouchableOpacity>
                   {editDraft.image.trim().length > 0 ? (
                     <View style={styles.previewWrap}>
                       <ImageWithFallback uri={editDraft.image.trim()} style={styles.previewImg} borderRadius={10} />
@@ -573,7 +565,6 @@ const styles = StyleSheet.create({
   },
   editTitle: { fontSize: 18, fontWeight: "600", color: theme.foreground, marginBottom: 12 },
   editFieldHint: { fontSize: 12, color: theme.mutedForeground, marginBottom: 6 },
-  editFieldHintSecondary: { fontSize: 11, color: theme.mutedForeground, marginBottom: 6, marginTop: 2, opacity: 0.9 },
   editPhotoBtn: {
     height: 44,
     borderRadius: theme.radiusLg,

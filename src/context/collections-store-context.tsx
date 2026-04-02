@@ -55,13 +55,19 @@ function safeNumber(v: any, fallback = 0): number {
   return fallback;
 }
 
-function normalizeCollection(raw: any): { id: number; name: string; description?: string | null; isPublic: boolean } | null {
+function normalizeCollection(
+  raw: any,
+): { id: number; name: string; description?: string | null; isPublic: boolean; imageUrl: string } | null {
   const id = safeNumber(raw?.id ?? raw?.collection_id, NaN);
   if (!Number.isFinite(id)) return null;
   const name = safeString(raw?.name, "").trim() || `Коллекция ${id}`;
   const description = raw?.description != null ? safeString(raw.description, "") : undefined;
   const isPublic = Boolean(raw?.is_public ?? raw?.isPublic ?? false);
-  return { id, name, description, isPublic };
+  const imageUrl = safeString(
+    raw?.image_url ?? raw?.image ?? raw?.cover_url ?? raw?.cover_image ?? raw?.thumbnail_url,
+    "",
+  ).trim();
+  return { id, name, description, isPublic, imageUrl };
 }
 
 function normalizeItem(raw: any): {
@@ -103,7 +109,7 @@ interface CollectionsStoreValue {
   collectionsError: string | null;
   isLoadingItemsForCollection: (collectionId: string) => boolean;
   refreshCollections: () => Promise<void>;
-  addCollection: (name: string, _image?: string) => Promise<number | null>;
+  addCollection: (name: string, imageUrl?: string) => Promise<number | null>;
   updateCollection: (collectionId: string, patch: { name?: string; image?: string }) => Promise<void>;
   deleteCollection: (collectionId: string) => Promise<void>;
   setCollectionVisibility: (collectionId: string, isPublic: boolean) => Promise<void>;
@@ -127,7 +133,9 @@ const CollectionsStoreContext = createContext<CollectionsStoreValue | null>(null
 export function CollectionsStoreProvider({ children }: { children: ReactNode }) {
   const { authToken } = useAppSettings();
 
-  const [collections, setCollections] = useState<{ id: number; name: string; description?: string | null; isPublic: boolean }[]>([]);
+  const [collections, setCollections] = useState<
+    { id: number; name: string; description?: string | null; isPublic: boolean; imageUrl: string }[]
+  >([]);
   const [itemsMap, setItemsMap] = useState<Record<string, CollectionItemRow[]>>({});
   const [categoriesById, setCategoriesById] = useState<Record<number, { id: number; name: string }>>({});
 
@@ -152,7 +160,15 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
       if (!Array.isArray(parsed.collections) || typeof parsed.itemsMap !== "object" || typeof parsed.categoriesById !== "object") {
         return false;
       }
-      setCollections(parsed.collections);
+      setCollections(
+        (parsed.collections as any[]).map(normalizeCollection).filter(Boolean) as {
+          id: number;
+          name: string;
+          description?: string | null;
+          isPublic: boolean;
+          imageUrl: string;
+        }[],
+      );
       setItemsMap(parsed.itemsMap);
       setCategoriesById(parsed.categoriesById);
       setCollectionsError(null);
@@ -210,7 +226,13 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
 
       const nextCollections = (rawCollections ?? [])
         .map(normalizeCollection)
-        .filter(Boolean) as { id: number; name: string; description?: string | null; isPublic: boolean }[];
+        .filter(Boolean) as {
+        id: number;
+        name: string;
+        description?: string | null;
+        isPublic: boolean;
+        imageUrl: string;
+      }[];
 
       const nextCategoriesById: Record<number, { id: number; name: string }> = {};
       for (const c of rawCategories ?? []) {
@@ -282,15 +304,16 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
   const collectionsList = useMemo<CollectionRow[]>(() => {
     return collections.map((c) => {
       const items = itemsMap[String(c.id)] ?? EMPTY_ITEMS;
+      const coverFromItems = items.map((i) => i.imageUrl?.trim()).find(Boolean) ?? "";
       return {
         id: c.id,
         name: c.name,
         itemCount: items.length,
         totalValue: items.reduce((s, i) => s + i.price, 0),
-        imageUrl: DEFAULT_COLLECTION_IMAGE,
+        imageUrl: c.imageUrl?.trim() || coverFromItems || DEFAULT_COLLECTION_IMAGE,
         isPublic: c.isPublic,
       };
-      });
+    });
   }, [collections, itemsMap]);
 
   const itemsForCollection = useCallback(
@@ -343,11 +366,16 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
   );
 
   const addCollection = useCallback(
-    async (name: string) => {
+    async (name: string, imageUrl?: string) => {
       if (!authToken) return null;
       const trimmed = name.trim();
       if (!trimmed) return null;
-      const res = await createCollectionApi({ token: authToken, name: trimmed });
+      const img = imageUrl?.trim();
+      const res = await createCollectionApi({
+        token: authToken,
+        name: trimmed,
+        ...(img ? { image_url: img } : {}),
+      });
       const id = safeNumber(res?.id ?? res?.collection_id, NaN);
       await refreshCollections();
       return Number.isFinite(id) ? id : null;
@@ -362,8 +390,14 @@ export function CollectionsStoreProvider({ children }: { children: ReactNode }) 
       const existing = collections.find((c) => c.id === id);
       const name = (patch.name ?? existing?.name ?? "").trim();
       if (!name) return;
-      // Backend schema supports name/description; image is ignored.
-      await updateCollectionApi({ token: authToken, collectionId: id, name });
+      await updateCollectionApi({
+        token: authToken,
+        collectionId: id,
+        name,
+        ...(patch.image !== undefined
+          ? { image_url: patch.image.trim() ? patch.image.trim() : null }
+          : {}),
+      });
       await refreshCollections();
     },
     [authToken, collections, refreshCollections],

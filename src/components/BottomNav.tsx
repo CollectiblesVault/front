@@ -2,7 +2,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
-import { FolderOpen, Gavel, Heart, Home, TrendingUp, Users } from "lucide-react-native";
+import { FolderOpen, Heart, Home, TrendingUp, Users } from "lucide-react-native";
 
 import { useTabTransition } from "../context/tab-transition-context";
 import type { RootStackParamList } from "../navigation/types";
@@ -42,9 +42,6 @@ function goTab(navigation: Nav, key: keyof RootStackParamList) {
     case "Community":
       navigation.navigate("Community");
       break;
-    case "Auction":
-      navigation.navigate("Auction");
-      break;
     case "UserProfile":
       navigation.navigate("UserProfile", { userId: "u-nina" });
       break;
@@ -59,7 +56,6 @@ const items: { key: keyof RootStackParamList; label: string; icon: typeof Home }
   { key: "Home", label: "Главная", icon: Home },
   { key: "Collections", label: "Мои", icon: FolderOpen },
   { key: "Community", label: "Публичные", icon: Users },
-  { key: "Auction", label: "Аукцион", icon: Gavel },
   { key: "Wishlist", label: "Желания", icon: Heart },
   { key: "Reports", label: "Отчёты", icon: TrendingUp },
 ];

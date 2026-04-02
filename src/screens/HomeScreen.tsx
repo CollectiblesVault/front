@@ -29,7 +29,7 @@ import { theme } from "../theme";
 import { CURRENCY_CODES, getCurrencyLabel } from "../utils/formatMoney";
 import { useCollectionsStore } from "../context/collections-store-context";
 import { useWishlist } from "../context/wishlist-context";
-import { patchMeApi, uploadMyAvatarApi } from "../api/vaultApi";
+import { extractUploadedImageUrl, patchMeApi, uploadMyAvatarApi } from "../api/vaultApi";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "Home">;
 
@@ -283,15 +283,16 @@ export function HomeScreen() {
                         patch: {
                           display_name: nextName,
                           email: nextEmail,
-                          ...(isRemoteAvatar ? { avatar_url: trimmedAvatar } : {}),
                         },
                       });
 
+                      let uploadedAvatarUrl: string | null = null;
                       if (trimmedAvatar.length > 0 && !isRemoteAvatar) {
-                        await uploadMyAvatarApi({
+                        const up = await uploadMyAvatarApi({
                           token: authToken,
                           fileUri: trimmedAvatar,
                         });
+                        uploadedAvatarUrl = extractUploadedImageUrl(up);
                       }
 
                       const resolvedEmail =
@@ -311,7 +312,8 @@ export function HomeScreen() {
                                 ? updated.user.displayName
                                 : nextName;
                       const resolvedAvatar =
-                        typeof updated?.avatar_url === "string"
+                        uploadedAvatarUrl ??
+                        (typeof updated?.avatar_url === "string"
                           ? updated.avatar_url
                           : typeof updated?.avatarUrl === "string"
                             ? updated.avatarUrl
@@ -319,7 +321,7 @@ export function HomeScreen() {
                               ? updated.user.avatar_url
                               : typeof updated?.user?.avatarUrl === "string"
                                 ? updated.user.avatarUrl
-                                : nextAvatar;
+                                : nextAvatar);
 
                       setUserProfile({ ...prevProfile, displayName: resolvedName, email: resolvedEmail, avatarUrl: resolvedAvatar });
                       setAccountMenuOpen(false);

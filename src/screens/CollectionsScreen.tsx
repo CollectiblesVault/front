@@ -122,12 +122,12 @@ export function CollectionsScreen() {
   };
 
   const openNewCollectionPhotoMenu = () => {
-    if (Platform.OS === "web") {
-      Alert.alert("Веб-версия", "Вставьте ссылку на обложку в поле ниже.");
-      return;
-    }
     if (!authToken) {
       Alert.alert("Нужен вход", "Войдите в аккаунт, чтобы загрузить обложку.");
+      return;
+    }
+    if (Platform.OS === "web") {
+      void runUploadNewCollectionPhoto("library");
       return;
     }
     Alert.alert("Обложка коллекции", "Файл будет загружен на сервер", [
@@ -313,28 +313,20 @@ export function CollectionsScreen() {
                     style={styles.createInput}
                   />
                   <Text style={styles.createFieldHint}>Обложка (необязательно)</Text>
-                  {Platform.OS !== "web" ? (
-                    <TouchableOpacity
-                      style={[styles.photoPickBtn, newCollectionPhotoUploading && { opacity: 0.6 }]}
-                      onPress={openNewCollectionPhotoMenu}
-                      disabled={newCollectionPhotoUploading}
-                      activeOpacity={0.88}
-                    >
-                      <Text style={styles.photoPickBtnText}>
-                        {newCollectionPhotoUploading ? "Загрузка…" : "Камера или галерея"}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : null}
-                  <Text style={styles.createFieldHintMuted}>Или ссылка https://…</Text>
-                  <TextInput
-                    value={newPhoto}
-                    onChangeText={setNewPhoto}
-                    placeholder="https://…"
-                    placeholderTextColor={theme.mutedForeground}
-                    style={styles.createInput}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
+                  <TouchableOpacity
+                    style={[styles.photoPickBtn, newCollectionPhotoUploading && { opacity: 0.6 }]}
+                    onPress={openNewCollectionPhotoMenu}
+                    disabled={newCollectionPhotoUploading}
+                    activeOpacity={0.88}
+                  >
+                    <Text style={styles.photoPickBtnText}>
+                      {newCollectionPhotoUploading
+                        ? "Загрузка…"
+                        : Platform.OS === "web"
+                          ? "Выбрать изображение"
+                          : "Камера или галерея"}
+                    </Text>
+                  </TouchableOpacity>
                   {newPhoto.trim().length > 0 ? (
                     <View style={styles.photoPreviewWrap}>
                       <ImageWithFallback uri={newPhoto.trim()} style={styles.photoPreview} borderRadius={14} />
@@ -466,7 +458,6 @@ const styles = StyleSheet.create({
   },
   createTitle: { fontSize: 18, fontWeight: "600", color: theme.foreground, marginBottom: 12 },
   createFieldHint: { fontSize: 12, color: theme.mutedForeground, marginBottom: 8 },
-  createFieldHintMuted: { fontSize: 11, color: theme.mutedForeground, marginBottom: 8, opacity: 0.9 },
   createInput: {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.border,

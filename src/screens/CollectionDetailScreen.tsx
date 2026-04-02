@@ -244,12 +244,12 @@ export function CollectionDetailScreen() {
   );
 
   const openNewItemPhotoMenu = useCallback(() => {
-    if (Platform.OS === "web") {
-      Alert.alert("Веб-версия", "Вставьте ссылку на изображение в поле ниже.");
-      return;
-    }
     if (!authToken) {
       Alert.alert("Нужен вход", "Войдите в аккаунт, чтобы загрузить фото.");
+      return;
+    }
+    if (Platform.OS === "web") {
+      void runUploadNewItemPhoto("library");
       return;
     }
     Alert.alert("Фото предмета", "Файл будет загружен на сервер", [
@@ -286,12 +286,12 @@ export function CollectionDetailScreen() {
   );
 
   const openCollectionCoverMenu = useCallback(() => {
-    if (Platform.OS === "web") {
-      Alert.alert("Веб-версия", "Вставьте ссылку на обложку в поле ниже.");
-      return;
-    }
     if (!authToken) {
       Alert.alert("Нужен вход", "Войдите в аккаунт, чтобы загрузить обложку.");
+      return;
+    }
+    if (Platform.OS === "web") {
+      void runUploadCollectionCover("library");
       return;
     }
     Alert.alert("Обложка коллекции", "Файл будет загружен на сервер", [
@@ -309,7 +309,7 @@ export function CollectionDetailScreen() {
     }
     const img = newItemDraft.image.trim();
     if (img.startsWith("file:") || img.startsWith("content:") || img.startsWith("ph://") || img.startsWith("assets-library:")) {
-      Alert.alert("Фото не загружено", "Сначала загрузите снимок на сервер или укажите https-ссылку.");
+      Alert.alert("Фото не загружено", "Сначала загрузите снимок на сервер.");
       return;
     }
     addItemToCollection(route.params.id, {
@@ -507,28 +507,20 @@ export function CollectionDetailScreen() {
                     />
                   </View>
                   <Text style={styles.fieldHint}>Обложка</Text>
-                  {Platform.OS !== "web" ? (
-                    <TouchableOpacity
-                      style={[styles.photoPickBtn, collectionCoverUploading && { opacity: 0.6 }]}
-                      onPress={openCollectionCoverMenu}
-                      disabled={collectionCoverUploading}
-                      activeOpacity={0.88}
-                    >
-                      <Text style={styles.photoPickBtnText}>
-                        {collectionCoverUploading ? "Загрузка…" : "Камера или галерея"}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : null}
-                  <Text style={styles.fieldHintSecondary}>Или ссылка https://…</Text>
-                  <TextInput
-                    value={collectionImageDraft}
-                    onChangeText={setCollectionImageDraft}
-                    placeholder="https://…"
-                    placeholderTextColor={theme.mutedForeground}
-                    style={styles.editInput}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
+                  <TouchableOpacity
+                    style={[styles.photoPickBtn, collectionCoverUploading && { opacity: 0.6 }]}
+                    onPress={openCollectionCoverMenu}
+                    disabled={collectionCoverUploading}
+                    activeOpacity={0.88}
+                  >
+                    <Text style={styles.photoPickBtnText}>
+                      {collectionCoverUploading
+                        ? "Загрузка…"
+                        : Platform.OS === "web"
+                          ? "Выбрать изображение"
+                          : "Камера или галерея"}
+                    </Text>
+                  </TouchableOpacity>
                   {collectionImageDraft.trim().length > 0 ? (
                     <View style={styles.previewWrap}>
                       <ImageWithFallback uri={collectionImageDraft.trim()} style={styles.previewImg} borderRadius={12} />
@@ -588,28 +580,20 @@ export function CollectionDetailScreen() {
                     style={styles.editInput}
                   />
                   <Text style={styles.fieldHint}>Фото</Text>
-                  {Platform.OS !== "web" ? (
-                    <TouchableOpacity
-                      style={[styles.photoPickBtn, newItemPhotoUploading && { opacity: 0.6 }]}
-                      onPress={openNewItemPhotoMenu}
-                      disabled={newItemPhotoUploading}
-                      activeOpacity={0.88}
-                    >
-                      <Text style={styles.photoPickBtnText}>
-                        {newItemPhotoUploading ? "Загрузка…" : "Камера или галерея"}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : null}
-                  <Text style={styles.fieldHintSecondary}>Или ссылка https://…</Text>
-                  <TextInput
-                    value={newItemDraft.image}
-                    onChangeText={(t) => setNewItemDraft((d) => ({ ...d, image: t }))}
-                    placeholder="https://…"
-                    placeholderTextColor={theme.mutedForeground}
-                    style={styles.editInput}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
+                  <TouchableOpacity
+                    style={[styles.photoPickBtn, newItemPhotoUploading && { opacity: 0.6 }]}
+                    onPress={openNewItemPhotoMenu}
+                    disabled={newItemPhotoUploading}
+                    activeOpacity={0.88}
+                  >
+                    <Text style={styles.photoPickBtnText}>
+                      {newItemPhotoUploading
+                        ? "Загрузка…"
+                        : Platform.OS === "web"
+                          ? "Выбрать изображение"
+                          : "Камера или галерея"}
+                    </Text>
+                  </TouchableOpacity>
 
                   {newItemDraft.image.trim().length > 0 ? (
                     <View style={styles.photoPreviewWrap}>
@@ -868,7 +852,6 @@ const styles = StyleSheet.create({
   },
   editSheetTall: { maxWidth: 440 },
   fieldHint: { fontSize: 12, color: theme.mutedForeground, marginBottom: 6 },
-  fieldHintSecondary: { fontSize: 11, color: theme.mutedForeground, marginBottom: 6, marginTop: 4, opacity: 0.9 },
   publicRow: {
     flexDirection: "row",
     alignItems: "center",

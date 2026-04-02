@@ -549,16 +549,24 @@ export async function createCollectionApi({
   token,
   name,
   description,
+  image_url,
 }: {
   token?: string | null;
   name: string;
   description?: string | null;
+  image_url?: string | null;
 }) {
   return apiRequest<any>({
     method: "POST",
     path: "/api/collections",
     token,
-    body: { name, ...(description !== undefined ? { description } : {}) },
+    body: {
+      name,
+      ...(description !== undefined ? { description } : {}),
+      ...(image_url !== undefined && image_url !== null && String(image_url).trim() !== ""
+        ? { image_url: String(image_url).trim() }
+        : {}),
+    },
   });
 }
 
@@ -567,17 +575,23 @@ export async function updateCollectionApi({
   collectionId,
   name,
   description,
+  image_url,
 }: {
   token?: string | null;
   collectionId: number;
   name: string;
   description?: string | null;
+  image_url?: string | null;
 }) {
   return apiRequest<any>({
     method: "PUT",
     path: `/api/collections/${collectionId}`,
     token,
-    body: { name, ...(description !== undefined ? { description } : {}) },
+    body: {
+      name,
+      ...(description !== undefined ? { description } : {}),
+      ...(image_url !== undefined ? { image_url: image_url?.trim() ? image_url.trim() : null } : {}),
+    },
   });
 }
 
@@ -744,101 +758,6 @@ export async function removeItemFromWishlistApi({ token, itemId }: { token?: str
     method: "DELETE",
     path: `/api/items/${itemId}/wishlist`,
     token,
-  });
-}
-
-export async function getLotsApi() {
-  return apiRequest<any[]>({
-    method: "GET",
-    path: "/api/lots",
-  });
-}
-
-export async function getLotBidsApi({
-  lotId,
-  token,
-}: {
-  lotId: number;
-  token?: string | null;
-}) {
-  return apiRequest<any[]>({
-    method: "GET",
-    path: `/api/lots/${lotId}/bids`,
-    token,
-  });
-}
-
-export async function closeLotApi({
-  lotId,
-  token,
-}: {
-  lotId: number;
-  token?: string | null;
-}) {
-  return apiRequest<any>({
-    method: "POST",
-    path: `/api/lots/${lotId}/close`,
-    token,
-  });
-}
-
-export async function settleExpiredLotsApi({ token }: { token?: string | null }) {
-  return apiRequest<any>({
-    method: "POST",
-    path: "/api/lots/settle-expired",
-    token,
-  });
-}
-
-export async function createLotApi({
-  token,
-  name,
-  collection_id,
-  item_id,
-  start_price,
-  step,
-  end_time,
-  description,
-}: {
-  token?: string | null;
-  name: string;
-  collection_id: number;
-  item_id?: number | null;
-  start_price: number | string;
-  step: number | string;
-  end_time: string;
-  description?: string | null;
-}) {
-  return apiRequest<any>({
-    method: "POST",
-    path: "/api/lot",
-    token,
-    body: {
-      name,
-      collection_id,
-      ...(item_id !== undefined ? { item_id } : {}),
-      start_price,
-      step,
-      end_time,
-      ...(description !== undefined ? { description } : {}),
-    },
-  });
-}
-
-export async function createBidApi({
-  token,
-  lot_id,
-  amount,
-}: {
-  token?: string | null;
-  lot_id: number;
-  amount: number | string;
-}) {
-  return apiRequest<any>({
-    method: "POST",
-    path: "/api/bid",
-    token,
-    body: { lot_id, amount },
   });
 }
 

@@ -6,7 +6,6 @@ import { BootstrapScreen } from "../screens/BootstrapScreen";
 import { CollectionDetailScreen } from "../screens/CollectionDetailScreen";
 import { CollectionsScreen } from "../screens/CollectionsScreen";
 import { CommunityScreen } from "../screens/CommunityScreen";
-import { AuctionScreen } from "../screens/AuctionScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { ItemDetailScreen } from "../screens/ItemDetailScreen";
 import { LoginScreen } from "../screens/LoginScreen";
@@ -55,7 +54,6 @@ export function RootNavigator() {
           <Stack.Screen name="Wishlist" component={WishlistScreen} />
           <Stack.Screen name="Reports" component={ReportsScreen} />
           <Stack.Screen name="Community" component={CommunityScreen} />
-          <Stack.Screen name="Auction" component={AuctionScreen} />
           <Stack.Screen name="UserProfile" component={UserProfileScreen} />
         </Stack.Navigator>
       </NavigationContainer>

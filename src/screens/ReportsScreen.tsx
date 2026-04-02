@@ -198,9 +198,9 @@ export function ReportsScreen() {
     const palette = [
       { label: "Коллекции", key: "collections" as const, color: theme.primary },
       { label: "Предметы", key: "items" as const, color: "rgba(212,175,55,0.95)" },
-      { label: "Лайки", key: "likes" as const, color: theme.foreground },
-      { label: "Комментарии", key: "comments" as const, color: "rgba(138,138,138,0.95)" },
-      { label: "В желаниях", key: "wishlist" as const, color: theme.primaryForeground },
+      { label: "Лайки", key: "likes" as const, color: "#C4A035" },
+      { label: "Комментарии", key: "comments" as const, color: "#8A6F1C" },
+      { label: "В желаниях", key: "wishlist" as const, color: "#5C4810" },
     ];
 
     return palette.map((p) => ({

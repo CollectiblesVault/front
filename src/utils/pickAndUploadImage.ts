@@ -9,11 +9,12 @@ export type PickedLocalImage = {
 };
 
 export async function pickImageFromDevice(source: "camera" | "library"): Promise<PickedLocalImage | null> {
-  if (Platform.OS === "web") {
-    return null;
-  }
   const ImagePicker = await import("expo-image-picker");
   if (source === "camera") {
+    if (Platform.OS === "web") {
+      Alert.alert("Камера", "В браузере выберите фото через «Галерея / файл».");
+      return null;
+    }
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (perm.status !== "granted") {
       Alert.alert("Нет доступа к камере", "Дайте разрешение в настройках устройства.");
@@ -30,14 +31,16 @@ export async function pickImageFromDevice(source: "camera" | "library"): Promise
     if (!uri) return null;
     return { uri, fileName: a?.fileName ?? undefined, mimeType: a?.mimeType ?? undefined };
   }
-  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (perm.status !== "granted") {
-    Alert.alert("Нет доступа к галерее", "Дайте разрешение в настройках устройства.");
-    return null;
+  if (Platform.OS !== "web") {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (perm.status !== "granted") {
+      Alert.alert("Нет доступа к галерее", "Дайте разрешение в настройках устройства.");
+      return null;
+    }
   }
   const res = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ImagePicker.MediaTypeOptions.Images,
-    allowsEditing: true,
+    allowsEditing: Platform.OS !== "web",
     quality: 0.85,
   });
   if (res.canceled) return null;
